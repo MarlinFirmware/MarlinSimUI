@@ -37,8 +37,8 @@ void _delay_ms(const int delay_ms) {
   delay(delay_ms);
 }
 
-uint32_t millis() {
-  return (uint32_t)Kernel::TimeControl::millis();
+unsigned long millis() {
+  return (unsigned long)Kernel::TimeControl::millis();
 }
 
 uint64_t micros() {
