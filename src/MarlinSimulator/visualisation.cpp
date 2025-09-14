@@ -1,6 +1,6 @@
 #include "visualisation.h"
 
-#include <glm/vec3.hpp>
+#include <glm/vec3.hpp>          // https://glm.g-truc.net/
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -9,18 +9,24 @@
 
 #include <vector>
 #include <array>
-#include <imgui_internal.h>
+#include <imgui_internal.h>      // https://github.com/ocornut/imgui
 #include <implot.h>
 
 #include "resources/resources.h"
 
 Visualisation::Visualisation(VirtualPrinter& virtual_printer) : virtual_printer(virtual_printer) {
+  //
+  // Bind printer kinematic updates → head position
+  //
   virtual_printer.on_kinematic_update = [this](kinematic_state& state){
     for (size_t i = 0; i < state.effector_position.size(); ++i) {
       this->set_head_position(i, state.effector_position[i]);
     }
   };
 
+  //
+  // Initialise extrusion containers
+  //
   for (int i = 0; i < EXTRUDERS; ++i) {
     extrusion.push_back({});
   }
@@ -30,10 +36,34 @@ Visualisation::~Visualisation() {
   destroy();
 }
 
-void Visualisation::create() {
-  extrusion_program = renderer::ShaderProgram::create("data/shaders/extrusion.vs", "data/shaders/extrusion.fs", "data/shaders/extrusion.gs");
-  default_program = renderer::ShaderProgram::create("data/shaders/default.vs","data/shaders/default.fs");
+//
+// Camera defaults – tweak to add new modes
+//
+static PerspectiveCamera initCamera = {
+  { 37.0f, 121.0f, 129.0f }, // Position
+  { -192.0f, -25.0, 0.0f },  // Rotation
+  { 0.0f, 1.0f, 0.0f },      // Up = Y-Axis
+  float(100) / float(100),   // Aspect Ratio
+  glm::radians(45.0f), 0.1f, 2000.0f // FOV, Near, Far
+};
 
+void Visualisation::create() {
+  //
+  // Load shaders (extrusion + default)
+  //
+  extrusion_program = renderer::ShaderProgram::create(
+    "data/shaders/extrusion.vs",
+    "data/shaders/extrusion.fs",
+    "data/shaders/extrusion.gs"
+  );
+  default_program = renderer::ShaderProgram::create(
+    "data/shaders/default.vs",
+    "data/shaders/default.fs"
+  );
+
+  //
+  // Framebuffer – MSAA first, fallback to texture
+  //
   framebuffer = new opengl_util::MsaaFrameBuffer();
   if (!((opengl_util::MsaaFrameBuffer*)framebuffer)->create(100, 100, 4)) {
     logger::warning("Failed to initialise MSAA Framebuffer falling back to TextureFramebuffer\n");
@@ -44,12 +74,16 @@ void Visualisation::create() {
     }
   }
 
-  camera = { {37.0f, 121.0f, 129.0f}, {-192.0f, -25.0, 0.0f}, {0.0f, 1.0f, 0.0f}, float(100) / float(100), glm::radians(45.0f), 0.1f, 2000.0f};
+  camera = initCamera;
   camera.generate();
 
+  //
+  // Build the extruder “head” meshes
+  //
   if (EXTRUDERS > 0) {
     auto mesh = renderer::create_mesh();
     auto buffer = renderer::Buffer<renderer::vertex_data_t>::create();
+
     buffer->data() = {
         renderer::vertex_data_t EFFECTOR_VERTEX(0.0, 0.0, 0.0, EFFECTOR_COLOR_1),
         EFFECTOR_VERTEX(-0.5, 0.5, 0.5, EFFECTOR_COLOR_2),
@@ -84,6 +118,9 @@ void Visualisation::create() {
     mesh_object->m_scale = effector_scale;
   }
 
+  //
+  // Set up the bed plane
+  //
   m_bed_mesh = renderer::create_mesh();
   auto mesh_object = renderer::get_mesh_by_id(m_bed_mesh);
   mesh_object->set_shader_program(default_program);
@@ -121,6 +158,23 @@ void Visualisation::create() {
     }
   }
 
+  //
+  // Optional: Load external 3‑D geometry
+  //
+  /*
+   * Example placeholder – replace with your loader:
+   *
+   * auto external_mesh = renderer::create_mesh();
+   * renderer::load_obj("path/to/model.obj", external_mesh);
+   * renderer::get_mesh_by_id(external_mesh)->set_shader_program(default_program);
+   *
+   * // Store it in a list for later rendering
+   * external_geometries.push_back(external_mesh);
+   */
+
+  //
+  // Initialise extruder positions from the printer state
+  //
   auto kin = virtual_printer.get_component<KinematicSystem>("Cartesian Kinematic System");
   if (kin == nullptr) kin = virtual_printer.get_component<KinematicSystem>("Delta Kinematic System");
   if (kin == nullptr) kin = virtual_printer.get_component<KinematicSystem>("CoreXY Kinematic System");
@@ -143,6 +197,13 @@ void Visualisation::create() {
   for (auto mesh : m_extruder_mesh) {
     renderer::render_mesh(mesh);
   }
+  //
+  // Render any externally loaded geometry
+  //
+  /*
+   * for (auto mesh_id : external_geometries)
+   *     renderer::render_mesh(mesh_id);
+   */
   renderer::render_list_is_ready();
   m_initialised = true;
 }
@@ -159,6 +220,9 @@ void Visualisation::update() {
   // last_update = now;
   auto effector_pos = extrusion[0].position;
 
+  //
+  // Camera follow logic – add new modes by extending FOLLOW_* enum
+  //
   switch (follow_mode) {
     case FOLLOW_Z:  camera.position = glm::vec3(effector_pos.x, camera.position.y, effector_pos.z); break;
     case FOLLOW_XY: camera.position = glm::vec3(camera.position.x, effector_pos.y + follow_offset.y, camera.position.z); break;
@@ -166,6 +230,9 @@ void Visualisation::update() {
   }
   camera.update_view();
 
+  //
+  // Update bed mesh based on PrintBed component
+  //
   auto print_bed = virtual_printer.get_component<PrintBed>("Print Bed");
 
   auto bed_mesh = renderer::get_mesh_by_id(m_bed_mesh);
@@ -265,6 +332,9 @@ void Visualisation::destroy() {
   renderer::destroy();
 }
 
+//
+// Set the head position – called by the printer kinematic update
+//
 void Visualisation::set_head_position(size_t hotend_index, extruder_state& state) {
   if (!m_initialised || hotend_index >= extrusion.size()) return;
   glm::vec4 sim_pos = state.position;
@@ -335,21 +405,27 @@ bool Visualisation::points_are_collinear(const glm::vec3 a, const glm::vec3 b, c
   return glm::abs(glm::dot(b - a, c - a) - (glm::length(b - a) * glm::length(c - a))) < threshold;
 }
 
+//
+// UI – viewport menu (camera settings, extrusion controls)
+//
 void Visualisation::ui_viewport_menu_callback(UiWindow*) {
   std::scoped_lock extrusion_lock(extrusion_mutex);
   bool open_settings = false;
   if (ImGui::BeginMenuBar()) {
     if (ImGui::BeginMenu("Camera")) {
+      // Reset camera
       if (ImGui::MenuItem("Reset")) {
-        camera.position = {37.0f, 121.0f, 129.0f};
-        camera.rotation = {-192.0f, -25.0, 0.0f};
-        camera.up       = {0.0f, 1.0f, 0.0f};
+        follow_mode = FOLLOW_NONE;
+        camera = initCamera;
+        camera.generate();
       }
       // if (ImGui::BeginMenu("Mode")) {
       //   if (ImGui::MenuItem("Fly", nullptr, true, true)) { }
       //   if (ImGui::MenuItem("Orbit", nullptr, false, true)) { }
       //   ImGui::EndMenu();
       // }
+
+      // Focus view presets
       if (ImGui::BeginMenu("Focus View")) {
         if (ImGui::MenuItem("Centre X (Right)")) {
           camera.position = {build_plate_dimension.x, 10.0f, -(build_plate_dimension.y / 2.0f)};
@@ -409,6 +485,9 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
   }
 }
 
+//
+// UI – viewport rendering + camera controls
+//
 void Visualisation::ui_viewport_callback(UiWindow* window) {
   std::scoped_lock extrusion_lock(extrusion_mutex);
   auto now = clock.now();
@@ -427,6 +506,11 @@ void Visualisation::ui_viewport_callback(UiWindow* window) {
   }
 
   if (viewport.focused) {
+    if (ImGui::IsKeyDown(ImGuiKey_R)) {
+      follow_mode = FOLLOW_NONE;
+      camera = initCamera;
+      camera.generate();
+    }
     if (ImGui::IsKeyDown(ImGuiKey_W)) {
       camera.position += camera.speed * camera.direction * delta;
     }
@@ -490,6 +574,9 @@ void Visualisation::ui_viewport_callback(UiWindow* window) {
     else if (camera.rotation.y < -89.0f) camera.rotation.y = -89.0f;
   }
 
+  //
+  // Render the “Extrusion Settings” popup
+  //
   if (ImGui::BeginPopup("Extrusion Settings")) {
     ImGui::PushItemWidth(150);
     ImGui::Text("Extrude Width    ");
@@ -538,6 +625,9 @@ void Visualisation::ui_viewport_callback(UiWindow* window) {
   }
 };
 
+//
+// UI – info panel (FPS, shader reload)
+//
 void Visualisation::ui_info_callback(UiWindow* w) {
   ImGui::Text("Application average %.3f ms/frame", 1000.0f / ImGui::GetIO().Framerate);
   ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
