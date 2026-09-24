@@ -42,6 +42,7 @@ public:
   void interrupt(GpioEvent& ev);
   void update();
   void ui_widget();
+  virtual void serialize(agent::JsonWriter& writer) const override;
 
   pin_type heater_pin, adc_pin;
 

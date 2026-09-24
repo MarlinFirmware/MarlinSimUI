@@ -9,7 +9,11 @@
 
 #include <glm/glm.hpp>
 
+#include <vector>
+
 struct kinematic_state;
+
+namespace agent { class JsonWriter; }
 
 class VirtualPrinter {
 public:
@@ -22,6 +26,35 @@ public:
     virtual void ui_init() {};
     virtual void ui_widget() {};
     virtual void ui_widgets();
+
+    /**
+     * Emit this component's state as a JSON object for the agent interface.
+     *
+     * Sibling of ui_widget(): where ui_widget() renders state for a human,
+     * serialize() reports it to a machine. The default writes an empty object,
+     * so components adopt this incrementally rather than in one flag day.
+     *
+     * Called on the simulation thread (see AgentServer). Keep it allocation
+     * -light and never block.
+     */
+    virtual void serialize(agent::JsonWriter& writer) const;
+
+    /**
+     * Capture this component's screen for the agent interface.
+     *
+     * Components that render a display fill rgb with 3 bytes per pixel,
+     * row-major, top row first, and set width/height. The default returns
+     * false, meaning "not a display" -- so like serialize(), displays adopt
+     * this one at a time.
+     *
+     * Called on the simulation thread. Reads the device's own CPU-side pixel
+     * buffer, NOT the GL texture, so it needs no GL context and works
+     * regardless of whether the window is visible or the UI pane is open.
+     */
+    virtual bool capture(std::vector<uint8_t>& rgb, uint32_t& width, uint32_t& height) const {
+      (void)rgb; (void)width; (void)height;
+      return false;
+    }
 
     template<typename T, class... Args>
     auto add_component(std::string name, Args&&... args) {
@@ -50,6 +83,27 @@ public:
   }
 
   static void ui_widgets();
+
+  // Serialize every registered component as {"<name>": {...}} for the agent
+  // interface. Components that have not implemented serialize() report {}.
+  static void serialize_all(agent::JsonWriter& writer);
+
+  // Serialize a single component by registry name. Returns false if unknown.
+  static bool serialize_one(const std::string& name, agent::JsonWriter& writer);
+
+  // Names of all registered components, in registration order.
+  static std::vector<std::string> component_names();
+
+  // Capture a display component by registry name. When name is empty the first
+  // component that reports a screen is used, which is what an agent wants on a
+  // machine with a single display. Returns false if no match.
+  static bool capture_display(const std::string& name,
+                              std::vector<uint8_t>& rgb,
+                              uint32_t& width, uint32_t& height,
+                              std::string& matched_name);
+
+  // Registry names of components that report a capturable screen.
+  static std::vector<std::string> display_names();
 
   static void build();
   static void update_kinematics();

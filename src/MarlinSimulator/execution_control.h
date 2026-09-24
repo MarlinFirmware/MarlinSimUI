@@ -252,4 +252,9 @@ public:
   static bool quit_requested;
   static std::atomic_uint64_t isr_timing_error;
   static std::atomic_bool debug_break_flag;
+
+  // Priority of the "Marlin Loop" pseudo-ISR (see Timers::timers). Anything
+  // with a numerically lower priority is a hardware ISR (stepper, temperature,
+  // systick) during which external state access is unsafe.
+  static constexpr uint64_t marlin_loop_isr_priority = 100;
 };

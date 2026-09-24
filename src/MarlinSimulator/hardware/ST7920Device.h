@@ -32,6 +32,17 @@ public:
   void ui_init() override;
   void ui_widget() override;
 
+  bool capture(std::vector<uint8_t>& rgb, uint32_t& out_width, uint32_t& out_height) const override {
+    out_width = width; out_height = height;
+    rgb.resize(size_t(width) * size_t(height) * 3);
+    for (size_t i = 0; i < size_t(width) * size_t(height); ++i) {
+      rgb[i * 3 + 0] = texture_data[i].x;
+      rgb[i * 3 + 1] = texture_data[i].y;
+      rgb[i * 3 + 2] = texture_data[i].z;
+    }
+    return true;
+  }
+
   static constexpr uint32_t width = 128, height = 64;
   bool render_integer_scaling = false, render_popout = false;
 

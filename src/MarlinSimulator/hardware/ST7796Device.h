@@ -39,6 +39,23 @@ public:
   void ui_init();
   void ui_widget();
 
+  bool capture(std::vector<uint8_t>& rgb, uint32_t& out_width, uint32_t& out_height) const override {
+    // graphic_ram is RGB565; expand to 8 bits per channel with bit
+    // replication so full-scale values map to 255 rather than 248/252.
+    out_width = width; out_height = height;
+    rgb.resize(size_t(width) * size_t(height) * 3);
+    for (size_t i = 0; i < size_t(width) * size_t(height); ++i) {
+      const uint16_t pixel = graphic_ram[i];
+      const uint8_t r5 = uint8_t((pixel >> 11) & 0x1F);
+      const uint8_t g6 = uint8_t((pixel >> 5)  & 0x3F);
+      const uint8_t b5 = uint8_t( pixel        & 0x1F);
+      rgb[i * 3 + 0] = uint8_t((r5 << 3) | (r5 >> 2));
+      rgb[i * 3 + 1] = uint8_t((g6 << 2) | (g6 >> 4));
+      rgb[i * 3 + 2] = uint8_t((b5 << 3) | (b5 >> 2));
+    }
+    return true;
+  }
+
   void onByteReceived(uint8_t _byte) override;
   void onEndTransaction() override;
 

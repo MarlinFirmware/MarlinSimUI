@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "KinematicSystem.h"
+#include "../agent/json.h"
 
 #include <src/inc/MarlinConfig.h>
 
@@ -88,6 +89,49 @@ enum AxisIndex {
   #endif
   COUNT
 };
+
+void KinematicSystem::serialize(agent::JsonWriter& writer) const {
+  // Ground truth: the simulated effector position derived from actual stepper
+  // counts, not Marlin's belief about where it is. This is the distinction that
+  // makes the agent interface useful for bug hunting.
+  writer.begin_object();
+
+  writer.key("position");
+  writer.begin_object();
+  writer.member("x", state.position.x);
+  writer.member("y", state.position.y);
+  writer.member("z", state.position.z);
+  writer.end_object();
+
+  writer.key("effectors");
+  writer.begin_array();
+  for (auto const& effector : state.effector_position) {
+    writer.begin_object();
+    writer.key("position");
+    writer.begin_object();
+    writer.member("x", effector.position.x);
+    writer.member("y", effector.position.y);
+    writer.member("z", effector.position.z);
+    writer.member("e", effector.position.w);
+    writer.end_object();
+    writer.key("stepper_position");
+    writer.begin_object();
+    writer.member("x", effector.stepper_position.x);
+    writer.member("y", effector.stepper_position.y);
+    writer.member("z", effector.stepper_position.z);
+    writer.end_object();
+    writer.end_object();
+  }
+  writer.end_array();
+
+  writer.key("steppers");
+  writer.begin_array();
+  for (auto const& stepper : steppers)
+    if (stepper) writer.value(stepper->name);
+  writer.end_array();
+
+  writer.end_object();
+}
 
 void KinematicSystem::collect_steppers() {
   steppers.push_back(add_component<StepperDriver>("StepperX", X_ENABLE_PIN, X_DIR_PIN, X_STEP_PIN, [this](){ this->kinematic_update(); }));

@@ -6,6 +6,8 @@
 #include "execution_control.h"
 #include "serial.h"
 #include "RawSocketSerial.h"
+#include "agent/agent_interface.h"
+#include "agent/serial_log.h"
 
 extern RawSocketSerial net_serial;
 extern MSerialT serial_stream_0;
@@ -45,33 +47,50 @@ bool Kernel::execute_loop(uint64_t max_end_ticks) {
   //simulation time lock
   TimeControl::realtime_sync();
 
+  // Serial capture: read once into a local buffer, then fan out to the UI
+  // terminal and the agent log, so what's captured is exactly what was
+  // transmitted. (Stream 3 already used this shape for the TCP bridge.)
+  static uint8_t serial_tx[1024];
+
   static auto terminal_0 = UserInterface::getElement<SerialMonitor>("Serial Monitor(0)");
   if (terminal_0) {
-    serial_stream_0.transmit_buffer.read(terminal_0->serial_buffer.in);
+    if (serial_stream_0.transmit_buffer.available()) {
+      auto count = serial_stream_0.transmit_buffer.read(serial_tx, std::size(serial_tx));
+      terminal_0->serial_buffer.in.write(serial_tx, count);
+      agent::serial_log.append(0, serial_tx, count);
+    }
     terminal_0->serial_buffer.out.read(serial_stream_0.receive_buffer);
   }
 
   static auto terminal_1 = UserInterface::getElement<SerialMonitor>("Serial Monitor(1)");
   if (terminal_1) {
-    serial_stream_1.transmit_buffer.read(terminal_1->serial_buffer.in);
+    if (serial_stream_1.transmit_buffer.available()) {
+      auto count = serial_stream_1.transmit_buffer.read(serial_tx, std::size(serial_tx));
+      terminal_1->serial_buffer.in.write(serial_tx, count);
+      agent::serial_log.append(1, serial_tx, count);
+    }
     terminal_1->serial_buffer.out.read(serial_stream_1.receive_buffer);
   }
 
   static auto terminal_2 = UserInterface::getElement<SerialMonitor>("Serial Monitor(2)");
   if (terminal_2) {
-    serial_stream_2.transmit_buffer.read(terminal_2->serial_buffer.in);
+    if (serial_stream_2.transmit_buffer.available()) {
+      auto count = serial_stream_2.transmit_buffer.read(serial_tx, std::size(serial_tx));
+      terminal_2->serial_buffer.in.write(serial_tx, count);
+      agent::serial_log.append(2, serial_tx, count);
+    }
     terminal_2->serial_buffer.out.read(serial_stream_2.receive_buffer);
   }
 
   static auto terminal_3 = UserInterface::getElement<SerialMonitor>("Serial Monitor(3)");
   if (terminal_3) {
     if (serial_stream_3.transmit_buffer.available()) {
-      static uint8_t buffer[1024];
-      auto count = serial_stream_3.transmit_buffer.read(buffer, std::size(buffer));
-      terminal_3->serial_buffer.in.write(buffer, count);
+      auto count = serial_stream_3.transmit_buffer.read(serial_tx, std::size(serial_tx));
+      terminal_3->serial_buffer.in.write(serial_tx, count);
+      agent::serial_log.append(3, serial_tx, count);
       {
         std::scoped_lock buffer_lock(net_serial.buffer_mutex);
-        net_serial.tx_buffer.write(buffer, count);
+        net_serial.tx_buffer.write(serial_tx, count);
       }
     }
     terminal_3->serial_buffer.out.read(serial_stream_3.receive_buffer);
@@ -83,6 +102,14 @@ bool Kernel::execute_loop(uint64_t max_end_ticks) {
     auto count = net_serial.readBytes(buffer, std::size(buffer));
     serial_stream_3.receive_buffer.write((uint8_t *)buffer, count);
   }
+
+  // Service queued agent requests on the simulation thread. execute_loop is
+  // reentrant (delayCycles/yield call it from inside an ISR), so only service
+  // when no hardware ISR is active — the Marlin Loop timer (lowest priority)
+  // is fine, and allowing it means agent polling still works while Marlin is
+  // blocked in a long move or a synchronize() spin.
+  if (isr_stack.empty() || isr_stack.back()->priority >= marlin_loop_isr_priority)
+    agent::server.service();
 
   uint64_t current_ticks = TimeControl::getTicks();
   uint64_t current_priority = std::numeric_limits<uint64_t>::max();

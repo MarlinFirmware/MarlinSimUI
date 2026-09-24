@@ -20,6 +20,7 @@
 #include "hardware/Buzzer.h"
 
 #include "virtual_printer.h"
+#include "agent/json.h"
 
 #include <src/inc/MarlinConfig.h>
 
@@ -50,7 +51,69 @@ void VirtualPrinter::Component::ui_widgets() {
   }
 }
 
+void VirtualPrinter::Component::serialize(agent::JsonWriter& writer) const {
+  // Default: an empty object, so unimplemented components still appear in
+  // GET /state with a well-formed (if uninformative) value.
+  writer.begin_object();
+  writer.end_object();
+}
+
+void VirtualPrinter::serialize_all(agent::JsonWriter& writer) {
+  writer.begin_object();
+  for (auto const& component : components) {
+    writer.key(component->name);
+    writer.begin_object();
+    writer.member("identifier", component->identifier);
+    writer.key("state");
+    component->serialize(writer);
+    writer.end_object();
+  }
+  writer.end_object();
+}
+
+bool VirtualPrinter::serialize_one(const std::string& name, agent::JsonWriter& writer) {
+  auto it = component_map.find(name);
+  if (it == component_map.end() || !it->second) return false;
+
+  writer.begin_object();
+  writer.member("identifier", it->second->identifier);
+  writer.key("state");
+  it->second->serialize(writer);
+  writer.end_object();
+  return true;
+}
+
+std::vector<std::string> VirtualPrinter::component_names() {
+  std::vector<std::string> names;
+  names.reserve(components.size());
+  for (auto const& component : components) names.push_back(component->name);
+  return names;
+}
+
+std::vector<std::string> VirtualPrinter::display_names() {
+  std::vector<std::string> names;
+  std::vector<uint8_t> probe;
+  uint32_t width = 0, height = 0;
+  for (auto const& component : components)
+    if (component->capture(probe, width, height)) names.push_back(component->name);
+  return names;
+}
+
+bool VirtualPrinter::capture_display(const std::string& name,
+                                     std::vector<uint8_t>& rgb,
+                                     uint32_t& width, uint32_t& height,
+                                     std::string& matched_name) {
+  for (auto const& component : components) {
+    if (!name.empty() && component->name != name) continue;
+    if (!component->capture(rgb, width, height)) continue;
+    matched_name = component->name;
+    return true;
+  }
+  return false;
+}
+
 std::map<uint64_t, uint64_t> servo_pin_lookup { {0, SERVO0_PIN}, {1, SERVO1_PIN}, {2, SERVO2_PIN}, {3, SERVO3_PIN}};
+
 
 void VirtualPrinter::build() {
   root = add_component<Component>("root");

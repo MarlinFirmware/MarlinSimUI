@@ -27,6 +27,7 @@ public:
 
   virtual void kinematic_update() = 0;
   void collect_steppers();
+  virtual void serialize(agent::JsonWriter& writer) const override;
 
   std::vector<glm::vec3> hardware_offset {};
   std::vector<std::shared_ptr<VirtualPrinter::Component>> steppers;

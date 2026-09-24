@@ -1,5 +1,7 @@
 #include <thread>
 #include <atomic>
+#include <cstring>
+#include <cstdlib>
 
 #include "application.h"
 #include "execution_control.h"
@@ -8,6 +10,7 @@
 
 #include "RawSocketSerial.h"
 #include "audio.h"
+#include "agent/agent_interface.h"
 
 RawSocketSerial net_serial{};
 
@@ -58,18 +61,85 @@ void simulation_main() {
   }
 }
 
+struct CommandLineOptions {
+  uint16_t serial_port = 8099;  // historical default for the raw G-code socket
+  uint16_t agent_port  = 0;     // 0 = agent interface disabled
+  bool audio_enabled   = true;
+};
+
+static void print_usage(const char* argv0) {
+  printf("Usage: %s [options]\n\n", argv0);
+  printf("  --serial-port <n>   TCP port for the raw G-code serial socket (default 8099)\n");
+  printf("  --agent-port <n>    Enable the HTTP agent control interface on 127.0.0.1:<n>\n");
+  printf("                      (also settable via MARLIN_SIM_AGENT_PORT)\n");
+  printf("  --no-audio          Disable audio/buzzer emulation\n");
+  printf("  --help              Show this message\n");
+}
+
+// Returns false if the program should exit immediately.
+static bool parse_command_line(int argc, char** argv, CommandLineOptions& options) {
+  if (const char* env = getenv("MARLIN_SIM_AGENT_PORT"))
+    options.agent_port = uint16_t(strtoul(env, nullptr, 10));
+
+  for (int i = 1; i < argc; ++i) {
+    const char* arg = argv[i];
+
+    auto next_port = [&](uint16_t& target) {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "%s requires a port number\n", arg);
+        return false;
+      }
+      unsigned long value = strtoul(argv[++i], nullptr, 10);
+      if (value == 0 || value > 65535) {
+        fprintf(stderr, "%s: invalid port '%s'\n", arg, argv[i]);
+        return false;
+      }
+      target = uint16_t(value);
+      return true;
+    };
+
+    if (strcmp(arg, "--serial-port") == 0) {
+      if (!next_port(options.serial_port)) return false;
+    }
+    else if (strcmp(arg, "--agent-port") == 0) {
+      if (!next_port(options.agent_port)) return false;
+    }
+    else if (strcmp(arg, "--no-audio") == 0) {
+      options.audio_enabled = false;
+    }
+    else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
+      print_usage(argv[0]);
+      return false;
+    }
+    else {
+      fprintf(stderr, "Unknown option: %s\n", arg);
+      print_usage(argv[0]);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 // Main code
-int main(int, char**) {
-  bool audio_enabled = true; // TODO: get from config
-  uint32_t sdl_flags = audio_enabled ? SDL_INIT_AUDIO : 0;
+int main(int argc, char** argv) {
+  CommandLineOptions options;
+  if (!parse_command_line(argc, argv, options)) return 0;
+
+  uint32_t sdl_flags = options.audio_enabled ? SDL_INIT_AUDIO : 0;
   SDL_Init(sdl_flags);
   SDLNet_Init();
 
-  if (audio_enabled) audio_init();
+  if (options.audio_enabled) audio_init();
 
   // Listen before starting simulator loop to avoid
   // thread synchronization issues if listen_on_port fails
-  net_serial.listen_on_port(8099);
+  net_serial.listen_on_port(options.serial_port);
+
+  if (options.agent_port) {
+    agent::register_routes();
+    agent::server.start(options.agent_port);  // non-fatal on failure
+  }
 
   Application app;
   std::thread simulation_loop(simulation_main);
@@ -83,6 +153,7 @@ int main(int, char**) {
   main_finished = true;
   Kernel::quit_requested = true;
   simulation_loop.join();
+  agent::server.stop();
   net_serial.stop();
 
   SDLNet_Quit();

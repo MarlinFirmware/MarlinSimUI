@@ -3,6 +3,7 @@
 #include "pinmapping.h"
 #include "Heater.h"
 #include "pwm_reader.h"
+#include "../agent/json.h"
 
 constexpr double absolute_zero_offset = -273.15;
 double thermistor_ext_coef[] = {
@@ -51,6 +52,29 @@ Heater::~Heater() {
 
 void Heater::update() {
 
+}
+
+void Heater::serialize(agent::JsonWriter& writer) const {
+  const char* mode = "Normal";
+  switch (m_temperature_sensor_mode) {
+    case ForceMin:   mode = "ForceMin";   break;
+    case ForceMax:   mode = "ForceMax";   break;
+    case ForcePause: mode = "ForcePause"; break;
+    default: break;
+  }
+
+  writer.begin_object();
+  writer.member("temperature", hotend_temperature);
+  writer.member("ambient_temperature", hotend_ambient_temperature);
+  writer.member("energy", hotend_energy);
+  writer.member("sensor_mode", mode);
+  writer.member("heater_pin", int64_t(heater_pin));
+  writer.member("adc_pin", int64_t(adc_pin));
+  writer.member("pwm_duty", pwm_duty);
+  writer.member("pwm_period", pwm_period);
+  writer.member("heater_volts", heater_volts);
+  writer.member("heater_resistance", heater_resistance);
+  writer.end_object();
 }
 
 void Heater::ui_widget() {

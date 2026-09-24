@@ -38,6 +38,17 @@ public:
   void ui_init();
   void ui_widget();
 
+  bool capture(std::vector<uint8_t>& rgb, uint32_t& out_width, uint32_t& out_height) const override {
+    out_width = width; out_height = height;
+    rgb.resize(size_t(width) * size_t(height) * 3);
+    for (size_t i = 0; i < size_t(width) * size_t(height); ++i) {
+      rgb[i * 3 + 0] = texture_data[i].x;
+      rgb[i * 3 + 1] = texture_data[i].y;
+      rgb[i * 3 + 2] = texture_data[i].z;
+    }
+    return true;
+  }
+
   struct {
     void update_address_counter(int8_t direction = 0) {
       direction = direction == 0 ? increment_direction : direction;

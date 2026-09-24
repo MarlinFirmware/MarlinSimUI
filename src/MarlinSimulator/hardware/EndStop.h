@@ -6,6 +6,7 @@
 
 #include "Gpio.h"
 #include "../virtual_printer.h"
+#include "../agent/json.h"
 
 class EndStop : public VirtualPrinter::Component {
 public:
@@ -34,6 +35,26 @@ public:
     if (ImGui::Checkbox("Enabled", &enabled_value)) {
       enabled = enabled_value;
     }
+  }
+
+  void serialize(agent::JsonWriter& writer) const override {
+    // Report both the logical trigger state and how it was produced, so an
+    // agent can tell a genuine geometric trigger from a manual override.
+    const bool logical = triggered && triggered();
+    const bool override_active = manual_override.load();
+    const bool effective = override_active ? manual_trigger_state.load()
+                                           : (logical && enabled.load());
+
+    writer.begin_object();
+    writer.member("triggered", effective);
+    writer.member("geometric_triggered", logical);
+    writer.member("enabled", enabled.load());
+    writer.member("manual_override", override_active);
+    writer.member("manual_trigger_state", manual_trigger_state.load());
+    writer.member("invert_logic", invert_logic);
+    writer.member("pin", int64_t(endstop));
+    writer.member("pin_level", invert_logic ? !effective : effective);
+    writer.end_object();
   }
 
   void interrupt(GpioEvent& ev) {

@@ -5,6 +5,8 @@
 #include "user_interface.h"
 #include "application.h"
 #include "logger.h"
+#include "agent/agent_interface.h"
+#include "agent/request_log.h"
 
 #include "../HAL.h"
 #include <src/MarlinCore.h>
@@ -68,6 +70,59 @@ Application::Application() {
   user_interface.addElement<SerialController>("SerialHost");
 
   user_interface.addElement<UiWindow>("Debug", [this](UiWindow* window){ this->sim.ui_info_callback(window); });
+
+  user_interface.addElement<UiWindow>("Agent Activity", [this](UiWindow* window){
+    // Agent HTTP requests. Serial traffic is NOT shown here -- G-code sent by
+    // an agent appears in Serial Monitor(3) like any other host's, and Marlin
+    // echoes the command text there when M111 S3 (DEBUG_ECHO) is enabled.
+    if (agent::server.port() == 0) {
+      ImGui::TextUnformatted("Agent interface disabled. Start with --agent-port <n>.");
+      return;
+    }
+
+    ImGui::Text("http://127.0.0.1:%d   requests: %llu",
+                agent::server.port(),
+                (unsigned long long)agent::request_log.total_requests());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Clear")) agent::request_log.clear();
+
+    ImGui::Separator();
+
+    if (ImGui::BeginTable("agent_requests", 5,
+                          ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
+                          ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp)) {
+      ImGui::TableSetupScrollFreeze(0, 1);
+      ImGui::TableSetupColumn("sim time", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+      ImGui::TableSetupColumn("method",   ImGuiTableColumnFlags_WidthFixed, 50.0f);
+      ImGui::TableSetupColumn("path");
+      ImGui::TableSetupColumn("status",   ImGuiTableColumnFlags_WidthFixed, 50.0f);
+      ImGui::TableSetupColumn("ms",       ImGuiTableColumnFlags_WidthFixed, 60.0f);
+      ImGui::TableHeadersRow();
+
+      auto entries = agent::request_log.snapshot();
+      for (auto const& e : entries) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::Text("%.2f", e.sim_seconds);
+        ImGui::TableNextColumn(); ImGui::TextUnformatted(e.method.c_str());
+        ImGui::TableNextColumn();
+        if (e.query.empty()) ImGui::TextUnformatted(e.path.c_str());
+        else ImGui::Text("%s?%s", e.path.c_str(), e.query.c_str());
+        ImGui::TableNextColumn();
+        // Colour by class so failures are findable at a glance.
+        if (e.status >= 500)      ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%d", e.status);
+        else if (e.status >= 400) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%d", e.status);
+        else                      ImGui::Text("%d", e.status);
+        ImGui::TableNextColumn(); ImGui::Text("%.1f", e.duration_ms);
+      }
+
+      // Follow the tail only when already pinned there, so scrolling back to
+      // inspect an old request isn't yanked away by incoming traffic.
+      if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+        ImGui::SetScrollHereY(1.0f);
+
+      ImGui::EndTable();
+    }
+  });
 
   user_interface.addElement<UiWindow>("Components", [this](UiWindow* window){ this->sim.testPrinter.ui_widgets(); });
   user_interface.addElement<Viewport>("Viewport", [this](UiWindow* window){ this->sim.vis.ui_viewport_callback(window); }, [this](UiWindow* window){ this->sim.vis.ui_viewport_menu_callback(window); });
