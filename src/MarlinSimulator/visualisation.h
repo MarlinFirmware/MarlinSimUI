@@ -64,6 +64,18 @@ public:
     view = glm::lookAt(position, position + direction, up);
   }
 
+  // Aim the camera from 'eye' at 'target', keeping the fly-mode angles in sync
+  // so switching to Fly mode continues from the same view.
+  void look_at(const glm::vec3 eye, const glm::vec3 target) {
+    position  = eye;
+    direction = glm::normalize(target - eye);
+    rotation.x = glm::degrees(atan2(direction.x, direction.z));
+    rotation.y = glm::degrees(asin(glm::clamp(direction.y, -1.0f, 1.0f)));
+    right = glm::normalize(glm::cross(direction, world_up));
+    up    = glm::cross(right, direction);
+    view  = glm::lookAt(position, target, up);
+  }
+
   void update_aspect_ratio(float ar) {
     aspect_ratio = ar;
     proj = glm::perspective(fov, aspect_ratio, clip_near, clip_far);
@@ -96,6 +108,18 @@ public:
 };
 
 enum FollowMode : uint8_t { FOLLOW_NONE, FOLLOW_Z, FOLLOW_XY };
+
+// Turntable: fixed camera aimed at the printer; dragging rotates the printer.
+// Fly: free WASD camera with captured-mouse look.
+enum CameraMode : uint8_t { CAMERA_TURNTABLE, CAMERA_FLY };
+
+// Turntable view state. Angles in degrees; yaw 0 = looking from the front.
+struct TurntableView {
+  glm::vec3 target {};    // Point the camera orbits and looks at (GL coordinates)
+  float yaw      = 30.0f; // Positive = camera moves to the printer's right
+  float pitch    = 25.0f; // Elevation above the bed plane
+  float distance = 500.0f;
+};
 
 struct Extrusion {
   glm::vec4 last_position = {};
@@ -142,6 +166,17 @@ public:
   void set_head_position(size_t hotend_index, extruder_state& position);
   bool points_are_collinear(const glm::vec3 a, const glm::vec3 b, const glm::vec3 c, double const threshold) const;
 
+  CameraMode camera_mode = CAMERA_TURNTABLE;
+  TurntableView turntable {};
+  bool follow_nozzle = false; // Turntable: keep the nozzle at the view center
+  bool auto_rotate = false;   // Turntable: slow spin while idle
+  TurntableView turntable_home() const;
+  void turntable_preset(const float yaw, const float pitch);
+  void turntable_apply();
+  void set_camera_mode(const CameraMode mode);
+  void turntable_input(struct Viewport& viewport, const float delta);
+  void fly_input(struct Viewport& viewport, const float delta);
+
   FollowMode follow_mode = FOLLOW_NONE;
   bool render_full_path = true;
   bool render_path_line = false;
@@ -184,6 +219,8 @@ public:
 struct Viewport : public UiWindow {
   bool hovered = false;
   bool focused = false;
+  bool active  = false;       // Mouse is held on the viewport (any button)
+  bool double_clicked = false;
   ImVec2 viewport_size;
   GLuint texture_id = 0;
   bool dirty        = false;
@@ -202,8 +239,19 @@ struct Viewport : public UiWindow {
       viewport_size = size;
       dirty         = true;
     }
+    const ImVec2 image_pos = ImGui::GetCursorScreenPos();
     ImGui::Image((ImTextureID)(intptr_t)texture_id, viewport_size, ImVec2(0, 1), ImVec2(1, 0));
     hovered = ImGui::IsItemHovered();
+    active = double_clicked = false;
+    if (viewport_size.x > 0 && viewport_size.y > 0) {
+      // Overlay an invisible button so drags on the image belong to the viewport
+      // (camera control) instead of moving an undocked window.
+      ImGui::SetCursorScreenPos(image_pos);
+      ImGui::InvisibleButton("##viewport_input", viewport_size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
+      hovered = ImGui::IsItemHovered();
+      active = ImGui::IsItemActive();
+      double_clicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+    }
     focused = ImGui::IsWindowFocused();
 
     if (show_callback) show_callback(this);

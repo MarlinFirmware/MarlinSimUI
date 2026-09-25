@@ -83,6 +83,8 @@ void Visualisation::create() {
 
   camera = initCamera;
   camera.generate();
+  turntable = turntable_home();
+  if (camera_mode == CAMERA_TURNTABLE) turntable_apply();
 
   //
   // Build the extruder “head” meshes
@@ -228,14 +230,20 @@ void Visualisation::update() {
   auto effector_pos = extrusion[0].position;
 
   //
-  // Camera follow logic – add new modes by extending FOLLOW_* enum
+  // Camera: Turntable aims at a target; Fly uses follow modes
   //
-  switch (follow_mode) {
-    case FOLLOW_Z:  camera.position = glm::vec3(effector_pos.x, camera.position.y, effector_pos.z); break;
-    case FOLLOW_XY: camera.position = glm::vec3(camera.position.x, effector_pos.y + follow_offset.y, camera.position.z); break;
-    default: break;
+  if (camera_mode == CAMERA_TURNTABLE) {
+    if (follow_nozzle) turntable.target = glm::vec3(effector_pos);
+    turntable_apply();
   }
-  camera.update_view();
+  else {
+    switch (follow_mode) {
+      case FOLLOW_Z:  camera.position = glm::vec3(effector_pos.x, camera.position.y, effector_pos.z); break;
+      case FOLLOW_XY: camera.position = glm::vec3(camera.position.x, effector_pos.y + follow_offset.y, camera.position.z); break;
+      default: break;
+    }
+    camera.update_view();
+  }
 
   //
   // Update bed mesh based on PrintBed component
@@ -286,7 +294,7 @@ void Visualisation::update() {
       mesh_object->m_position = pos;
       mesh_object->m_transform_dirty = true;
     }
-    mesh_object->m_visible = (follow_mode != FOLLOW_Z);
+    mesh_object->m_visible = (camera_mode == CAMERA_TURNTABLE || follow_mode != FOLLOW_Z);
 
     if (ext.should_clear) {
       draw_list_update = true;
@@ -420,20 +428,38 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
   bool open_settings = false;
   if (ImGui::BeginMenuBar()) {
     if (ImGui::BeginMenu("Camera")) {
-      // Reset camera
-      if (ImGui::MenuItem("Reset")) {
-        follow_mode = FOLLOW_NONE;
-        camera = initCamera;
-        camera.generate();
+      if (ImGui::MenuItem("Reset", "R")) {
+        if (camera_mode == CAMERA_TURNTABLE)
+          turntable = turntable_home();
+        else {
+          follow_mode = FOLLOW_NONE;
+          camera = initCamera;
+          camera.generate();
+        }
       }
-      // if (ImGui::BeginMenu("Mode")) {
-      //   if (ImGui::MenuItem("Fly", nullptr, true, true)) { }
-      //   if (ImGui::MenuItem("Orbit", nullptr, false, true)) { }
-      //   ImGui::EndMenu();
-      // }
+      if (ImGui::BeginMenu("Mode")) {
+        if (ImGui::MenuItem("Turntable", nullptr, camera_mode == CAMERA_TURNTABLE)) set_camera_mode(CAMERA_TURNTABLE);
+        if (ImGui::MenuItem("Fly", nullptr, camera_mode == CAMERA_FLY)) set_camera_mode(CAMERA_FLY);
+        ImGui::EndMenu();
+      }
 
-      // Focus view presets
-      if (ImGui::BeginMenu("Focus View")) {
+      if (camera_mode == CAMERA_TURNTABLE) {
+        // Turntable view presets (yaw, pitch)
+        if (ImGui::BeginMenu("View")) {
+          if (ImGui::MenuItem("Front", "1"))  turntable_preset(  0.0f,  0.0f);
+          if (ImGui::MenuItem("Right", "3"))  turntable_preset( 90.0f,  0.0f);
+          if (ImGui::MenuItem("Back"))        turntable_preset(180.0f,  0.0f);
+          if (ImGui::MenuItem("Left"))        turntable_preset(-90.0f,  0.0f);
+          if (ImGui::MenuItem("Top", "7"))    turntable_preset(  0.0f, 89.0f);
+          if (ImGui::MenuItem("3/4", "0"))    turntable_preset( 30.0f, 25.0f);
+          ImGui::EndMenu();
+        }
+        ImGui::MenuItem("Follow Nozzle", "F", &follow_nozzle);
+        if (!follow_nozzle && ImGui::MenuItem("Center on Bed")) turntable.target = turntable_home().target;
+        ImGui::MenuItem("Auto-Rotate", nullptr, &auto_rotate);
+      }
+      else if (ImGui::BeginMenu("Focus View")) {
+        // Fly camera presets
         if (ImGui::MenuItem("Centre X (Right)")) {
           camera.position = {build_plate_dimension.x, 10.0f, -(build_plate_dimension.y / 2.0f)};
           camera.rotation = {-90.0f, 0.0, 0.0f};
@@ -493,26 +519,98 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
 }
 
 //
-// UI – viewport rendering + camera controls
+// Turntable camera
 //
-void Visualisation::ui_viewport_callback(UiWindow* window) {
-  static bool invert_pan = false;
 
-  std::scoped_lock extrusion_lock(extrusion_mutex);
-  auto now = clock.now();
-  float delta = std::chrono::duration_cast<std::chrono::duration<float>>(now- last_update).count();
-  last_update = now;
+// Home view: 3/4 from the front-right, framing the whole build volume
+TurntableView Visualisation::turntable_home() const {
+  // Build volume in GL coordinates: X right, Y up, Z toward the viewer (Marlin -Y)
+  const glm::vec3 size { float(build_plate_dimension.x), float(Z_MAX_POS - Z_MIN_POS), float(build_plate_dimension.y) };
+  TurntableView v;
+  v.target = { size.x * 0.5f, size.y * 0.25f, -size.z * 0.5f };
+  // Distance at which the bounding sphere fits the vertical field of view, plus margin
+  const float radius = glm::length(size) * 0.5f;
+  v.distance = radius / sin(camera.fov * 0.5f) * 1.05f;
+  return v;
+}
 
-  Viewport& viewport = *((Viewport*)window);
-  auto& ex = extrusion[0];
+void Visualisation::turntable_preset(const float yaw, const float pitch) {
+  turntable.yaw = yaw;
+  turntable.pitch = pitch;
+  auto_rotate = false;
+}
 
-  if (viewport.dirty) {
-    viewport.viewport_size.x = viewport.viewport_size.x > 0 ? viewport.viewport_size.x : 0;
-    viewport.viewport_size.y = viewport.viewport_size.y > 0 ? viewport.viewport_size.y : 0;
-    framebuffer->update(viewport.viewport_size.x, viewport.viewport_size.y);
-    viewport.texture_id = framebuffer->texture_id();
-    camera.update_aspect_ratio(viewport.viewport_size.x / viewport.viewport_size.y);
+// Place the camera on a sphere around the target
+void Visualisation::turntable_apply() {
+  turntable.pitch = glm::clamp(turntable.pitch, -10.0f, 89.0f);
+  turntable.distance = glm::clamp(turntable.distance, 10.0f, 1900.0f);
+  turntable.yaw = fmod(turntable.yaw, 360.0f);
+  const float yaw = glm::radians(turntable.yaw), pitch = glm::radians(turntable.pitch);
+  const glm::vec3 offset { sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch) };
+  camera.look_at(turntable.target + offset * turntable.distance, turntable.target);
+}
+
+void Visualisation::set_camera_mode(const CameraMode mode) {
+  if (mode == camera_mode) return;
+  if (mode == CAMERA_FLY) {
+    // Fly continues from the current turntable view (look_at synced the angles)
+    follow_mode = FOLLOW_NONE;
+    camera.update_view();
   }
+  else
+    turntable_apply();
+  camera_mode = mode;
+}
+
+// Left-drag rotates the printer, right/middle-drag pans, wheel zooms.
+// The pointer is never captured.
+void Visualisation::turntable_input(Viewport& viewport, const float delta) {
+  ImGuiIO& io = ImGui::GetIO();
+
+  if (viewport.active) {
+    const ImVec2 d = io.MouseDelta;
+    if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && !io.KeyShift) {
+      turntable.yaw   -= d.x * 0.3f;  // Drag right: printer turns right
+      turntable.pitch += d.y * 0.3f;  // Drag down: tip the top toward the viewer
+      auto_rotate = false;
+    }
+    else if (ImGui::IsMouseDown(ImGuiMouseButton_Right) || ImGui::IsMouseDown(ImGuiMouseButton_Middle) || io.KeyShift) {
+      // Pan in the view plane, scaled so the point under the cursor tracks it
+      const float units_per_pixel = 2.0f * turntable.distance * tan(camera.fov * 0.5f) / std::max(1.0f, viewport.viewport_size.y);
+      turntable.target += (-d.x * camera.right + d.y * camera.up) * units_per_pixel;
+      follow_nozzle = false;
+    }
+  }
+
+  if (viewport.hovered && io.MouseWheel != 0)
+    turntable.distance *= pow(0.9f, io.MouseWheel);
+
+  if (viewport.double_clicked) turntable = turntable_home();
+
+  if (viewport.focused) {
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) turntable = turntable_home();
+    if (ImGui::IsKeyPressed(ImGuiKey_F)) follow_nozzle ^= true;
+    if (ImGui::IsKeyPressed(ImGuiKey_1) || ImGui::IsKeyPressed(ImGuiKey_Keypad1)) turntable_preset( 0.0f,  0.0f);
+    if (ImGui::IsKeyPressed(ImGuiKey_3) || ImGui::IsKeyPressed(ImGuiKey_Keypad3)) turntable_preset(90.0f,  0.0f);
+    if (ImGui::IsKeyPressed(ImGuiKey_7) || ImGui::IsKeyPressed(ImGuiKey_Keypad7)) turntable_preset( 0.0f, 89.0f);
+    if (ImGui::IsKeyPressed(ImGuiKey_0) || ImGui::IsKeyPressed(ImGuiKey_Keypad0)) turntable_preset(30.0f, 25.0f);
+    // Arrow keys turn and tilt; +/- zoom
+    const float turn = 90.0f * delta;
+    if (ImGui::IsKeyDown(ImGuiKey_LeftArrow))  turntable.yaw   += turn;
+    if (ImGui::IsKeyDown(ImGuiKey_RightArrow)) turntable.yaw   -= turn;
+    if (ImGui::IsKeyDown(ImGuiKey_UpArrow))    turntable.pitch += turn;
+    if (ImGui::IsKeyDown(ImGuiKey_DownArrow))  turntable.pitch -= turn;
+    if (ImGui::IsKeyDown(ImGuiKey_Equal) || ImGui::IsKeyDown(ImGuiKey_KeypadAdd))      turntable.distance *= 1.0f - delta;
+    if (ImGui::IsKeyDown(ImGuiKey_Minus) || ImGui::IsKeyDown(ImGuiKey_KeypadSubtract)) turntable.distance *= 1.0f + delta;
+  }
+
+  if (auto_rotate && !viewport.active) turntable.yaw += 12.0f * delta;
+}
+
+// Free-flying camera (the original controls)
+void Visualisation::fly_input(Viewport& viewport, const float delta) {
+  static bool invert_pan = false;
+  auto& ex = extrusion[0];
 
   if (viewport.focused) {
     // R = Camera Reset
@@ -567,7 +665,7 @@ void Visualisation::ui_viewport_callback(UiWindow* window) {
   }
 
   bool last_mouse_captured = mouse_captured;
-  if (ImGui::IsMouseDown(0) && viewport.hovered) {
+  if (ImGui::IsMouseDown(0) && viewport.active) {
     mouse_captured = true;
   } else if (!ImGui::IsMouseDown(0)) {
     mouse_captured = false;
@@ -593,6 +691,31 @@ void Visualisation::ui_viewport_callback(UiWindow* window) {
     if (camera.rotation.y > 89.0f) camera.rotation.y = 89.0f;
     else if (camera.rotation.y < -89.0f) camera.rotation.y = -89.0f;
   }
+}
+
+//
+// UI – viewport rendering + camera controls
+//
+void Visualisation::ui_viewport_callback(UiWindow* window) {
+  std::scoped_lock extrusion_lock(extrusion_mutex);
+  auto now = clock.now();
+  float delta = std::chrono::duration_cast<std::chrono::duration<float>>(now- last_update).count();
+  last_update = now;
+
+  Viewport& viewport = *((Viewport*)window);
+
+  if (viewport.dirty) {
+    viewport.viewport_size.x = viewport.viewport_size.x > 0 ? viewport.viewport_size.x : 0;
+    viewport.viewport_size.y = viewport.viewport_size.y > 0 ? viewport.viewport_size.y : 0;
+    framebuffer->update(viewport.viewport_size.x, viewport.viewport_size.y);
+    viewport.texture_id = framebuffer->texture_id();
+    camera.update_aspect_ratio(viewport.viewport_size.x / viewport.viewport_size.y);
+  }
+
+  if (camera_mode == CAMERA_TURNTABLE)
+    turntable_input(viewport, delta);
+  else
+    fly_input(viewport, delta);
 
   //
   // Render the “Extrusion Settings” popup
