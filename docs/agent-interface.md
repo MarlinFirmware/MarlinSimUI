@@ -35,6 +35,7 @@ Command-line options:
 | `--agent-port <n>` | Enable the agent interface on `127.0.0.1:<n>`. Off by default. |
 | `--serial-port <n>` | TCP port for the raw G-code socket (default 8099). |
 | `--no-audio` | Disable buzzer/audio emulation (useful for unattended runs). |
+| `--machine <type>` | Viewport printer model: `bedslinger`, `cube` or `delta`. Default follows the build's kinematics. DELTA builds accept only `delta`; other builds accept all but `delta`. |
 | `--help` | Usage. |
 
 The simulator does not exit on its own. Stop it with `POST /kernel/control
@@ -75,6 +76,8 @@ Simulation-thread requests time out with 503 after 5 s of wall-clock time.
 | `GET /displays` | sim | Components that can be captured. |
 | `POST /screenshot` | sim | `{"path":"/abs/file.png"[, "display":"<name>"]}`. Writes a PNG. |
 | `POST /touch` | sim | `{"x":0..1, "y":0..1[, "hold_ms":N]}`. Taps or holds the touchscreen. |
+| `GET /view` | direct | Current Viewport camera and printer model (see 2.6). |
+| `POST /view` | direct | Set the Viewport camera and/or printer model. Applied on the next UI frame. |
 
 **Thread** is the route's affinity. `sim` routes are queued and executed on the
 simulation thread (safe to read Marlin and component state); if the simulation
@@ -143,6 +146,32 @@ Components opt in by overriding `Component::serialize()`. Implemented:
 
 Others report `{}`. Prefer reporting simulated ground truth over Marlin's
 belief — the difference between the two is usually the bug.
+
+### 2.6 Viewport camera and printer model
+
+`GET /view` returns `{"ok", "mode": "turntable"|"fly", "machine", "yaw",
+"pitch", "distance", "x", "y", "z", "follow"}`. `x`,`y`,`z` is the camera
+target.
+
+`POST /view` switches to the Turntable camera and applies any of these keys
+(all optional):
+
+| Key | Meaning |
+| --- | --- |
+| `preset` | `front`, `right`, `back`, `left` (15° pitch), `top` or `iso` change the angle and keep the distance and target. `home` resets the whole view. |
+| `yaw`, `pitch` | Degrees. |
+| `distance` | mm from the target, > 0. |
+| `x`, `y`, `z` | Camera target in Marlin coordinates (mm). All three or none. |
+| `follow` | `true` keeps the nozzle at the view center. |
+| `machine` | `bedslinger`, `cube` or `delta`; same availability rule as `--machine`. |
+
+The request is queued and applied on the next UI frame (the agent thread never
+touches the camera), so it works while the simulation is frozen; poll
+`GET /view` to confirm. Errors: 400 for bad JSON, a partial target,
+`distance <= 0`, or an unknown/unavailable machine.
+
+The Viewport itself can't be captured by `POST /screenshot` yet; use the OS
+window capture (e.g. macOS `screencapture`) after setting the view.
 
 ---
 

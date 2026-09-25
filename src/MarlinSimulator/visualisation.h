@@ -21,6 +21,7 @@
 #include "user_interface.h"
 
 #include "renderer/renderer.h"
+#include "machine_model.h"
 
 constexpr glm::ivec2 build_plate_dimension{X_BED_SIZE, Y_BED_SIZE};
 constexpr glm::ivec2 build_plate_offset{X_MIN_POS, Y_MIN_POS};
@@ -193,6 +194,13 @@ public:
 
   std::shared_ptr<renderer::ShaderProgram> extrusion_program;
   std::shared_ptr<renderer::ShaderProgram> default_program;
+  std::shared_ptr<renderer::ShaderProgram> lit_program;
+
+  MachineModel machine;
+  bool show_machine = true;
+  bool render_list_dirty = false;
+  void set_machine_type(const MachineType type);
+  void apply_view_request();
 
   bool mouse_captured = false;
   glm::vec<2, int> mouse_lock_pos;

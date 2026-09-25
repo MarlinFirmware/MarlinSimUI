@@ -199,6 +199,37 @@ static const char * data_shader_default_fs = R"SHADERSTR(
       }
   })SHADERSTR";
 
+// Lit shader for solid models: one directional key light with half-Lambert wrap
+static const char * data_shader_lit_vs = R"SHADERSTR(
+  #version 330 core
+  layout(location = 0) in vec3 i_position;
+  layout(location = 1) in vec3 i_normal;
+  layout(location = 2) in vec4 i_color;
+  out vec4 v_color;
+  out vec3 v_normal;
+  uniform mat4 u_mvp;
+  uniform mat4 u_model;
+  void main() {
+      v_color = i_color;
+      v_normal = normalize(transpose(inverse(mat3(u_model))) * i_normal);
+      gl_Position = u_mvp * vec4(i_position, 1.0);
+  })SHADERSTR";
+
+static const char * data_shader_lit_fs = R"SHADERSTR(
+  #version 330 core
+  in vec4 v_color;
+  in vec3 v_normal;
+  out vec4 o_color;
+  void main() {
+      const vec3 key_dir = normalize(vec3(0.45, 1.0, 0.65));  // From above, front-right
+      const vec3 fill_dir = normalize(vec3(-0.6, 0.3, -0.4)); // Soft fill from back-left
+      vec3 n = normalize(v_normal);
+      float key = dot(n, key_dir) * 0.5 + 0.5;
+      float fill = max(dot(n, fill_dir), 0.0);
+      float light = 0.25 + 0.7 * key * key + 0.2 * fill;
+      o_color = vec4(v_color.rgb * light, v_color.a);
+  })SHADERSTR";
+
 }
 
 static constexpr char const* imgui_ini = R"(

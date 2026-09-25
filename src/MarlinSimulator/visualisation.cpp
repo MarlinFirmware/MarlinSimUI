@@ -13,6 +13,7 @@
 #include <implot.h>
 
 #include "resources/resources.h"
+#include "view_control.h"
 
 #include <src/inc/MarlinConfig.h>
 
@@ -44,6 +45,14 @@ Visualisation::~Visualisation() {
 }
 
 //
+// Camera zoom sensitivity
+//
+constexpr float turntable_wheel_zoom = 0.05f;  // Turntable: fraction of the view distance per wheel notch
+constexpr float turntable_key_zoom   = 1.0f;   // Turntable: fraction of the view distance per second holding +/-
+constexpr float fly_wheel_zoom       = 20.0f;  // Fly: mm moved per wheel notch
+constexpr float fly_key_zoom         = 100.0f; // Fly: mm per second holding E/Q
+
+//
 // Camera defaults – tweak to add new modes
 //
 static PerspectiveCamera initCamera = {
@@ -51,7 +60,7 @@ static PerspectiveCamera initCamera = {
   { -192.0f, -25.0, 0.0f },  // Rotation
   { 0.0f, 1.0f, 0.0f },      // Up = Y-Axis
   float(100) / float(100),   // Aspect Ratio
-  glm::radians(45.0f), 0.1f, 2000.0f // FOV, Near, Far
+  glm::radians(45.0f), 2.0f, 5000.0f // FOV, Near, Far (near > 1 keeps depth precision for whole-printer views)
 };
 
 void Visualisation::create() {
@@ -66,6 +75,10 @@ void Visualisation::create() {
   default_program = renderer::ShaderProgram::create(
     "data/shaders/default.vs",
     "data/shaders/default.fs"
+  );
+  lit_program = renderer::ShaderProgram::create(
+    "data/shaders/lit.vs",
+    "data/shaders/lit.fs"
   );
 
   //
@@ -83,6 +96,13 @@ void Visualisation::create() {
 
   camera = initCamera;
   camera.generate();
+
+  //
+  // Printer model, chosen from the Marlin kinematics
+  //
+  machine.build(machine_type_option < MACHINE_TYPE_COUNT ? machine_type_option : MachineModel::default_type(), lit_program);
+  machine.set_visible(show_machine);
+
   turntable = turntable_home();
   if (camera_mode == CAMERA_TURNTABLE) turntable_apply();
 
@@ -137,6 +157,36 @@ void Visualisation::create() {
   mesh_object->buffer_vector<renderer::vertex_data_t>().push_back(bed_mesh_buffer);
   bed_mesh_buffer->data().reserve((BED_NUM_VERTEXES_PER_AXIS * BED_NUM_VERTEXES_PER_AXIS * 6));
 
+  #if ENABLED(DELTA)
+
+    // A Delta bed is round: a disc of rings and sectors, centered on the build plate
+    {
+      constexpr int rings = 50, sectors = 120;
+      const GLfloat cx = build_plate_dimension.x * 0.5f, cz = -build_plate_dimension.y * 0.5f,
+                    radius = std::min(build_plate_dimension.x, build_plate_dimension.y) * 0.5f;
+      auto point = [&](const int ring, const int sector) {
+        const GLfloat r = radius * ring / rings, a = glm::two_pi<GLfloat>() * sector / sectors;
+        return glm::vec2(cx + r * std::cos(a), cz + r * std::sin(a));
+      };
+      // Emit one triangle wound counter-clockwise seen from above (+Y), like the square bed
+      auto triangle = [&](glm::vec2 p0, glm::vec2 p1, glm::vec2 p2) {
+        const glm::vec2 e1 = p1 - p0, e2 = p2 - p0;
+        if (e1.y * e2.x - e1.x * e2.y < 0) std::swap(p1, p2); // Y of cross((e1.x,0,e1.y), (e2.x,0,e2.y))
+        bed_mesh_buffer->add_vertex(BED_VERTEX(p0.x, p0.y));
+        bed_mesh_buffer->add_vertex(BED_VERTEX(p1.x, p1.y));
+        bed_mesh_buffer->add_vertex(BED_VERTEX(p2.x, p2.y));
+      };
+      for (int ring = 0; ring < rings; ++ring)
+        for (int sector = 0; sector < sectors; ++sector) {
+          const glm::vec2 a = point(ring, sector), b = point(ring, sector + 1),
+                          c = point(ring + 1, sector), d = point(ring + 1, sector + 1);
+          if (ring) triangle(a, b, d);   // The innermost ring is a fan
+          triangle(a, d, c);
+        }
+    }
+
+  #else
+
   // Calculate the number of divisions (line segments) along each axis.
   const GLfloat x_div = GLfloat(build_plate_dimension.x) / (BED_NUM_VERTEXES_PER_AXIS - 1);
   const GLfloat y_div = GLfloat(-build_plate_dimension.y) / (BED_NUM_VERTEXES_PER_AXIS - 1);
@@ -166,6 +216,8 @@ void Visualisation::create() {
       bed_mesh_buffer->add_vertex(BED_VERTEX(x2, y1));
     }
   }
+
+  #endif // !DELTA
 
   //
   // Optional: Load external 3‑D geometry
@@ -206,6 +258,7 @@ void Visualisation::create() {
   for (auto mesh : m_extruder_mesh) {
     renderer::render_mesh(mesh);
   }
+  machine.queue_render();
   //
   // Render any externally loaded geometry
   //
@@ -230,10 +283,33 @@ void Visualisation::update() {
   auto effector_pos = extrusion[0].position;
 
   //
+  // Printer model: place the bed and moving parts for the current nozzle position
+  //
+  const glm::vec3 nozzle { effector_pos.x, -effector_pos.z, effector_pos.y }; // Back to Marlin XYZ
+  MachinePose pose = machine.pose(nozzle);
+  if (!show_machine) {
+    pose.bed_offset = {};
+    pose.nozzle_world = glm::vec3(effector_pos);
+  }
+  if (machine.type == MACHINE_DELTA) {
+    // Delta tower steppers are linear, so they give the carriage heights directly
+    if (auto delta = virtual_printer.get_component<DeltaKinematicSystem>("Delta Kinematic System")) {
+      pose.has_towers = true;
+      pose.towers = delta->hardware_offset[0] + delta->state.effector_position[0].stepper_position;
+    }
+  }
+  if (show_machine) machine.update(pose);
+
+  //
+  // Agent camera requests (POST /view), applied on the UI thread
+  //
+  apply_view_request();
+
+  //
   // Camera: Turntable aims at a target; Fly uses follow modes
   //
   if (camera_mode == CAMERA_TURNTABLE) {
-    if (follow_nozzle) turntable.target = glm::vec3(effector_pos);
+    if (follow_nozzle) turntable.target = pose.nozzle_world;
     turntable_apply();
   }
   else {
@@ -283,18 +359,23 @@ void Visualisation::update() {
     }
     print_bed->dirty = false;
   }
+  if (bed_mesh->m_position != pose.bed_offset) {
+    bed_mesh->m_position = pose.bed_offset;
+    bed_mesh->m_transform_dirty = true;
+  }
 
   // update the position of the extruder mesh for visualisation
   size_t mesh_id = 0;
   bool draw_list_update = false;
   for (auto& ext : extrusion ) {
-    auto pos = glm::vec3(ext.position.x, ext.position.y, ext.position.z);
+    auto pos = glm::vec3(ext.position.x, ext.position.y, ext.position.z) + pose.bed_offset;
     auto mesh_object = renderer::get_mesh_by_id(m_extruder_mesh[mesh_id]);
     if (mesh_object->m_position != pos) {
       mesh_object->m_position = pos;
       mesh_object->m_transform_dirty = true;
     }
-    mesh_object->m_visible = (camera_mode == CAMERA_TURNTABLE || follow_mode != FOLLOW_Z);
+    // The simple pointer marks the nozzle only when the printer model is hidden
+    mesh_object->m_visible = !show_machine && (camera_mode == CAMERA_TURNTABLE || follow_mode != FOLLOW_Z);
 
     if (ext.should_clear) {
       draw_list_update = true;
@@ -318,16 +399,26 @@ void Visualisation::update() {
     auto extrusion_mesh_object = renderer::get_mesh_by_id(ext.mesh);
     if (extrusion_mesh_object != nullptr) {
       extrusion_mesh_object->m_visible = ext.is_visible;
+      // The print rides on the bed
+      if (extrusion_mesh_object->m_position != pose.bed_offset) {
+        extrusion_mesh_object->m_position = pose.bed_offset;
+        extrusion_mesh_object->m_transform_dirty = true;
+      }
     }
 
     mesh_id ++;
   }
 
+  if (render_list_dirty) {
+    draw_list_update = true;
+    render_list_dirty = false;
+  }
   if (draw_list_update) {
     renderer::render_mesh(m_bed_mesh);
     for (auto mesh : m_extruder_mesh) {
       renderer::render_mesh(mesh);
     }
+    machine.queue_render();
     for (auto& ext : extrusion) {
       renderer::render_mesh(ext.mesh);
     }
@@ -342,8 +433,10 @@ void Visualisation::destroy() {
     framebuffer->release();
     delete framebuffer;
   }
+  machine.destroy();
   extrusion_program.reset();
   default_program.reset();
+  lit_program.reset();
   renderer::destroy();
 }
 
@@ -476,6 +569,23 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
       }
       ImGui::EndMenu();
     }
+    if (ImGui::BeginMenu("Printer")) {
+      if (ImGui::MenuItem("Show Printer", nullptr, show_machine)) {
+        show_machine = !show_machine;
+        machine.set_visible(show_machine);
+      }
+      ImGui::Separator();
+      for (uint8_t t = 0; t < MACHINE_TYPE_COUNT; ++t) {
+        const MachineType type = MachineType(t);
+        if (!MachineModel::is_available(type)) continue;
+        const bool is_default = type == MachineModel::default_type();
+        char label[40];
+        snprintf(label, sizeof(label), "%s%s", MachineModel::type_name(type), is_default ? " (config)" : "");
+        if (ImGui::MenuItem(label, nullptr, machine.type == type) && machine.type != type)
+          set_machine_type(type);
+      }
+      ImGui::EndMenu();
+    }
     if (ImGui::BeginMenu("Extrusion")) {
       if (ImGui::MenuItem("Settings")) {
         open_settings = true;
@@ -519,18 +629,83 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
 }
 
 //
+// Apply a pending POST /view request and publish the camera for GET /view
+//
+void Visualisation::apply_view_request() {
+  view_control::Request r;
+  bool have = false;
+  {
+    std::scoped_lock lock(view_control::mutex);
+    if (view_control::pending) { r = view_control::request; view_control::pending = false; have = true; }
+  }
+  if (have) {
+    if (!r.machine.empty()) {
+      const MachineType type = machine_type_from_name(r.machine.c_str());
+      if (MachineModel::is_available(type) && type != machine.type) {
+        machine.build(type, lit_program);
+        machine.set_visible(show_machine);
+        render_list_dirty = true;
+      }
+    }
+    camera_mode = CAMERA_TURNTABLE;
+    if (!r.preset.empty()) {
+      if (r.preset == "home") turntable = turntable_home();
+      else if (r.preset == "front") turntable_preset(0, 15);
+      else if (r.preset == "right") turntable_preset(90, 15);
+      else if (r.preset == "back")  turntable_preset(180, 15);
+      else if (r.preset == "left")  turntable_preset(-90, 15);
+      else if (r.preset == "top")   turntable_preset(0, 89);
+      else if (r.preset == "iso")   turntable_preset(30, 25);
+    }
+    if (r.has_yaw) turntable.yaw = r.yaw;
+    if (r.has_pitch) turntable.pitch = r.pitch;
+    if (r.has_distance) turntable.distance = r.distance;
+    if (r.has_target) turntable.target = { r.target[0], r.target[2], -r.target[1] }; // Marlin -> GL
+    if (r.has_follow) follow_nozzle = r.follow;
+    auto_rotate = false;
+  }
+  std::scoped_lock lock(view_control::mutex);
+  auto& s = view_control::state;
+  s.turntable = camera_mode == CAMERA_TURNTABLE;
+  s.yaw = turntable.yaw; s.pitch = turntable.pitch; s.distance = turntable.distance;
+  s.target[0] = turntable.target.x; s.target[1] = -turntable.target.z; s.target[2] = turntable.target.y;
+  s.follow = follow_nozzle;
+  s.machine = MachineModel::type_name(machine.type);
+}
+
+//
+// Switch the printer model shown in the viewport.
+// The caller must hold extrusion_mutex (the viewport menu callback does). It's
+// a plain std::mutex, so locking it again here deadlocked the UI thread.
+//
+void Visualisation::set_machine_type(const MachineType type) {
+  machine.build(type, lit_program);
+  machine.set_visible(show_machine);
+  render_list_dirty = true;
+  if (camera_mode == CAMERA_TURNTABLE && !follow_nozzle) {
+    const TurntableView home = turntable_home();
+    turntable.target = home.target;
+    turntable.distance = home.distance;
+  }
+}
+
+//
 // Turntable camera
 //
 
 // Home view: 3/4 from the front-right, framing the whole build volume
 TurntableView Visualisation::turntable_home() const {
-  // Build volume in GL coordinates: X right, Y up, Z toward the viewer (Marlin -Y)
-  const glm::vec3 size { float(build_plate_dimension.x), float(Z_MAX_POS - Z_MIN_POS), float(build_plate_dimension.y) };
+  // Frame the printer model, or the build volume when the model is hidden.
+  // GL coordinates: X right, Y up, Z toward the viewer (Marlin -Y)
+  glm::vec3 lo { 0.0f, 0.0f, -float(build_plate_dimension.y) },
+            hi { float(build_plate_dimension.x), float(Z_MAX_POS - Z_MIN_POS), 0.0f };
+  if (show_machine) { lo = machine.bounds_min; hi = machine.bounds_max; }
+  const glm::vec3 size = hi - lo;
   TurntableView v;
-  v.target = { size.x * 0.5f, size.y * 0.25f, -size.z * 0.5f };
-  // Distance at which the bounding sphere fits the vertical field of view, plus margin
+  v.target = (lo + hi) * 0.5f;
+  // Distance at which the bounding sphere fits the vertical field of view
   const float radius = glm::length(size) * 0.5f;
-  v.distance = radius / sin(camera.fov * 0.5f) * 1.05f;
+  v.distance = radius / sin(camera.fov * 0.5f) * 0.9f;
   return v;
 }
 
@@ -543,7 +718,7 @@ void Visualisation::turntable_preset(const float yaw, const float pitch) {
 // Place the camera on a sphere around the target
 void Visualisation::turntable_apply() {
   turntable.pitch = glm::clamp(turntable.pitch, -10.0f, 89.0f);
-  turntable.distance = glm::clamp(turntable.distance, 10.0f, 1900.0f);
+  turntable.distance = glm::clamp(turntable.distance, 20.0f, 4500.0f);
   turntable.yaw = fmod(turntable.yaw, 360.0f);
   const float yaw = glm::radians(turntable.yaw), pitch = glm::radians(turntable.pitch);
   const glm::vec3 offset { sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch) };
@@ -583,7 +758,7 @@ void Visualisation::turntable_input(Viewport& viewport, const float delta) {
   }
 
   if (viewport.hovered && io.MouseWheel != 0)
-    turntable.distance *= pow(0.9f, io.MouseWheel);
+    turntable.distance *= pow(1.0f - turntable_wheel_zoom, io.MouseWheel);
 
   if (viewport.double_clicked) turntable = turntable_home();
 
@@ -600,8 +775,8 @@ void Visualisation::turntable_input(Viewport& viewport, const float delta) {
     if (ImGui::IsKeyDown(ImGuiKey_RightArrow)) turntable.yaw   -= turn;
     if (ImGui::IsKeyDown(ImGuiKey_UpArrow))    turntable.pitch += turn;
     if (ImGui::IsKeyDown(ImGuiKey_DownArrow))  turntable.pitch -= turn;
-    if (ImGui::IsKeyDown(ImGuiKey_Equal) || ImGui::IsKeyDown(ImGuiKey_KeypadAdd))      turntable.distance *= 1.0f - delta;
-    if (ImGui::IsKeyDown(ImGuiKey_Minus) || ImGui::IsKeyDown(ImGuiKey_KeypadSubtract)) turntable.distance *= 1.0f + delta;
+    if (ImGui::IsKeyDown(ImGuiKey_Equal) || ImGui::IsKeyDown(ImGuiKey_KeypadAdd))      turntable.distance *= 1.0f - turntable_key_zoom * delta;
+    if (ImGui::IsKeyDown(ImGuiKey_Minus) || ImGui::IsKeyDown(ImGuiKey_KeypadSubtract)) turntable.distance *= 1.0f + turntable_key_zoom * delta;
   }
 
   if (auto_rotate && !viewport.active) turntable.yaw += 12.0f * delta;
@@ -642,10 +817,10 @@ void Visualisation::fly_input(Viewport& viewport, const float delta) {
     }
     // E / Q = Camera Zoom / Unzoom
     if (ImGui::IsKeyDown(ImGuiKey_E)) {
-      camera.position += camera.speed * camera.direction * delta;
+      camera.position += fly_key_zoom * camera.direction * delta;
     }
     if (ImGui::IsKeyDown(ImGuiKey_Q)) {
-      camera.position -= camera.speed * camera.direction * delta;
+      camera.position -= fly_key_zoom * camera.direction * delta;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F)) {
       follow_mode = follow_mode == FOLLOW_Z ? FOLLOW_NONE : FOLLOW_Z;
@@ -660,7 +835,7 @@ void Visualisation::fly_input(Viewport& viewport, const float delta) {
         follow_offset = camera.position - glm::vec3(ex.position);
     }
     if (ImGui::GetIO().MouseWheel != 0 && viewport.hovered) {
-      camera.position += camera.speed * camera.direction * delta * ImGui::GetIO().MouseWheel;
+      camera.position += fly_wheel_zoom * camera.direction * ImGui::GetIO().MouseWheel;
     }
   }
 

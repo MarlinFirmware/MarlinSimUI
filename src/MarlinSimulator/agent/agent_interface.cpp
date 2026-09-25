@@ -5,6 +5,8 @@
 
 #include "../execution_control.h"
 #include "../virtual_printer.h"
+#include "../view_control.h"
+#include "../machine_model.h"
 
 #include "serial.h"
 #include <src/gcode/queue.h>
@@ -259,6 +261,71 @@ void handle_post_serial(const Request& request, Response& response) {
   response.json(writer.str());
 }
 
+// GET /view  — current Viewport camera
+// POST /view — set the Viewport camera (Turntable mode). All keys optional:
+//   {"preset":"home|front|right|back|left|top|iso", "yaw":deg, "pitch":deg,
+//    "distance":mm, "x":mm, "y":mm, "z":mm (target, Marlin coordinates; all three),
+//    "follow":bool, "machine":"bedslinger|cube|delta"}
+// Applied on the next UI frame; poll GET /view to confirm.
+void handle_get_view(const Request&, Response& response) {
+  const view_control::State v = view_control::current();
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("ok", true);
+  writer.member("mode", v.turntable ? "turntable" : "fly");
+  writer.member("machine", v.machine);
+  writer.member("yaw", double(v.yaw));
+  writer.member("pitch", double(v.pitch));
+  writer.member("distance", double(v.distance));
+  writer.member("x", double(v.target[0]));
+  writer.member("y", double(v.target[1]));
+  writer.member("z", double(v.target[2]));
+  writer.member("follow", v.follow);
+  writer.end_object();
+  response.json(writer.str());
+}
+
+void handle_post_view(const Request& request, Response& response) {
+  JsonValue body;
+  if (!body.parse(request.body)) {
+    response.error(400, "body is not valid JSON");
+    return;
+  }
+  view_control::Request r;
+  double d = 0;
+  if (body.get_double("yaw", d))      { r.has_yaw = true; r.yaw = float(d); }
+  if (body.get_double("pitch", d))    { r.has_pitch = true; r.pitch = float(d); }
+  if (body.get_double("distance", d)) {
+    if (d <= 0) { response.error(400, "distance must be > 0"); return; }
+    r.has_distance = true; r.distance = float(d);
+  }
+  if (body.get_bool("follow", r.follow)) r.has_follow = true;
+  body.get_string("preset", r.preset);
+  body.get_string("machine", r.machine);
+  if (!r.machine.empty()) {
+    const MachineType type = machine_type_from_name(r.machine.c_str());
+    if (type == MACHINE_TYPE_COUNT) { response.error(400, "machine must be bedslinger, cube, or delta"); return; }
+    if (!MachineModel::is_available(type)) { response.error(400, "machine not available for this build's kinematics"); return; }
+  }
+  const int axes = body.has("x") + body.has("y") + body.has("z");
+  if (axes) {
+    double x = 0, y = 0, z = 0;
+    if (axes != 3 || !body.get_double("x", x) || !body.get_double("y", y) || !body.get_double("z", z)) {
+      response.error(400, "target needs numeric x, y and z");
+      return;
+    }
+    r.target[0] = float(x); r.target[1] = float(y); r.target[2] = float(z);
+    r.has_target = true;
+  }
+  view_control::post(r);
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("ok", true);
+  writer.member("hint", "applied on the next UI frame; GET /view to confirm");
+  writer.end_object();
+  response.json(writer.str());
+}
+
 #if HAS_SIM_DISPLAY
 
 // POST /screenshot — write a display capture to a file.
@@ -476,6 +543,9 @@ void register_routes() {
   // POST /gcode never blocks, so it needs no special budget.
   server.route("POST /gcode", handle_post_gcode);
   server.route("GET /idle", handle_get_idle);
+  // Viewport camera: mailbox to the UI thread, so it works while the sim is frozen
+  server.route("GET /view", handle_get_view, Affinity::Direct);
+  server.route("POST /view", handle_post_view, Affinity::Direct);
 
   #if HAS_SIM_DISPLAY
     server.route("POST /screenshot", handle_post_screenshot);

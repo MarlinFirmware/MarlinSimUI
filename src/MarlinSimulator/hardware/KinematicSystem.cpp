@@ -750,8 +750,10 @@ DeltaKinematicSystem::DeltaKinematicSystem(std::function<void(kinematic_state&)>
   collect_steppers();
 
   recalc_delta_settings();
-  // Add an offset as on deltas the linear rails minimum position are offset from the bed
-  hardware_offset.push_back({ 217.0807,  217.0807, 217.0807 });
+  // The rails' zero is the carriage height with the nozzle tip on the bed at the center,
+  // where each arm spans DELTA_RADIUS horizontally: sqrt(rod^2 - radius^2) above the bed.
+  const double rail_zero = std::sqrt(std::max(0.0, delta_diagonal_rod * delta_diagonal_rod - delta_radius * delta_radius));
+  hardware_offset.push_back(glm::vec3(rail_zero));
 }
 
 void DeltaKinematicSystem::kinematic_update() {

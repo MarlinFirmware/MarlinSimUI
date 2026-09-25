@@ -287,7 +287,7 @@ public:
     GLuint vbo = m_vbo;
     GLuint vao = m_vao;
     if (m_vbo) gl_defer_call([vbo]() { renderer::gl_assert_call(glDeleteBuffers, 1, &vbo); });
-    if (m_vao) gl_defer_call([vao]() { renderer::gl_assert_call(glDeleteBuffers, 1, &vao); });
+    if (m_vao) gl_defer_call([vao]() { renderer::gl_assert_call(glDeleteVertexArrays, 1, &vao); });
     m_vbo = m_vao = 0;
   }
 

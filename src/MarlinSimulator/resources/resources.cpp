@@ -12,6 +12,8 @@ namespace resource {
     {{"data/shaders/extrusion.fs"}, std::make_shared<Resource>(data_shader_extrusion_fs)},
     {{"data/shaders/default.vs"}, std::make_shared<Resource>(data_shader_default_vs)},
     {{"data/shaders/default.fs"}, std::make_shared<Resource>(data_shader_default_fs)},
+    {{"data/shaders/lit.vs"}, std::make_shared<Resource>(data_shader_lit_vs)},
+    {{"data/shaders/lit.fs"}, std::make_shared<Resource>(data_shader_lit_fs)},
     {{"imgui.ini"}, std::make_shared<Resource>(imgui_ini)},
   } ;
 
