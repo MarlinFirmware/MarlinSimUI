@@ -386,6 +386,7 @@ void VirtualPrinter::build() {
 
   #ifdef BEEPER_PIN
     #ifdef SPEAKER
+      // Real speaker device needed.
     #else
       root->add_component<Buzzer>("Buzzer", BEEPER_PIN, false);
     #endif

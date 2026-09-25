@@ -15,6 +15,11 @@ extern MSerialT serial_stream_3;
 #include <cstring>
 #include <chrono>
 
+
+#if ANY(TFT_INTERFACE_SPI, HAS_MARLINUI_HD44780, HAS_MARLINUI_U8GLIB)
+  #define HAS_SIM_DISPLAY 1
+#endif
+
 namespace agent {
 
 AgentServer server;
@@ -254,6 +259,8 @@ void handle_post_serial(const Request& request, Response& response) {
   response.json(writer.str());
 }
 
+#if HAS_SIM_DISPLAY
+
 // POST /screenshot — write a display capture to a file.
 //   {"path": "/tmp/lcd.png"}                  first display found
 //   {"path": "...", "display": "<name>"}      a specific display
@@ -316,6 +323,8 @@ void handle_get_displays(const Request&, Response& response) {
   writer.end_object();
   response.json(writer.str());
 }
+
+#endif // HAS_SIM_DISPLAY
 
 // POST /gcode — submit G-code the way a host would.
 //   {"command": "G28"}
@@ -389,6 +398,8 @@ void handle_get_idle(const Request&, Response& response) {
   response.json(writer.str());
 }
 
+#if ENABLED(TOUCH_SCREEN)
+
 // POST /touch — press the touchscreen, as a user would with the mouse.
 //   {"x": 0.5, "y": 0.5}                 tap at panel ratios 0..1
 //   {"x": 0.5, "y": 0.5, "hold_ms": 1500} press-and-hold (simulated ms)
@@ -435,6 +446,8 @@ void handle_post_touch(const Request& request, Response& response) {
   response.json(writer.str());
 }
 
+#endif // TOUCH_SCREEN
+
 // GET /ping — liveness probe that proves the simulation thread is servicing
 // requests (it can only be answered from execute_loop).
 void handle_get_ping(const Request&, Response& response) {
@@ -463,9 +476,14 @@ void register_routes() {
   // POST /gcode never blocks, so it needs no special budget.
   server.route("POST /gcode", handle_post_gcode);
   server.route("GET /idle", handle_get_idle);
-  server.route("POST /screenshot", handle_post_screenshot);
-  server.route("GET /displays", handle_get_displays);
-  server.route("POST /touch", handle_post_touch);
+
+  #if HAS_SIM_DISPLAY
+    server.route("POST /screenshot", handle_post_screenshot);
+    server.route("GET /displays", handle_get_displays);
+    #if ENABLED(TOUCH_SCREEN)
+      server.route("POST /touch", handle_post_touch);
+    #endif
+  #endif
 
   // Prefix route: any GET /state/<name>.
   server.route_prefix("GET /state/", handle_get_state_component);
