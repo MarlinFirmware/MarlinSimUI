@@ -56,6 +56,19 @@ public:
       return false;
     }
 
+    /**
+     * Inject a touch for the agent interface, as if the screen were pressed at
+     * (rx, ry) -- ratios 0..1 of the panel -- and released after hold_ms of
+     * simulated time (0 = a tap as short as a mouse click). The default
+     * returns false, meaning "not a touch device".
+     *
+     * Called on the simulation thread.
+     */
+    virtual bool inject_touch(float rx, float ry, uint32_t hold_ms) {
+      (void)rx; (void)ry; (void)hold_ms;
+      return false;
+    }
+
     template<typename T, class... Args>
     auto add_component(std::string name, Args&&... args) {
       auto component = VirtualPrinter::add_component<T>(name, args...);
@@ -104,6 +117,9 @@ public:
 
   // Registry names of components that report a capturable screen.
   static std::vector<std::string> display_names();
+
+  // Inject a touch into the first touch device. Returns false if there is none.
+  static bool inject_touch(float rx, float ry, uint32_t hold_ms, std::string& matched_name);
 
   static void build();
   static void update_kinematics();

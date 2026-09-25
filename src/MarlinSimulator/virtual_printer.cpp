@@ -112,6 +112,15 @@ bool VirtualPrinter::capture_display(const std::string& name,
   return false;
 }
 
+bool VirtualPrinter::inject_touch(float rx, float ry, uint32_t hold_ms, std::string& matched_name) {
+  for (auto const& component : components) {
+    if (!component->inject_touch(rx, ry, hold_ms)) continue;
+    matched_name = component->name;
+    return true;
+  }
+  return false;
+}
+
 std::map<uint64_t, uint64_t> servo_pin_lookup { {0, SERVO0_PIN}, {1, SERVO1_PIN}, {2, SERVO2_PIN}, {3, SERVO3_PIN}};
 
 

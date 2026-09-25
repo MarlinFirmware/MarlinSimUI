@@ -155,34 +155,65 @@ void ST7796Device::ui_widget() {
 
       popout_begin = ImGui::Begin("ST7796DeviceRender", &render_popout);
       if (!popout_begin) {
+        // Collapsed popout: End() the window but DO NOT return. We are inside
+        // BeginChild, and skipping EndChild() unbalances ImGui's ID stack
+        // ("Calling PopID too many times. Must call EndChild() and not End()"),
+        // which corrupts input handling for the rest of the session.
         ImGui::End();
-        return;
       }
-      size = ImGui::GetContentRegionAvail();
+      else
+        size = ImGui::GetContentRegionAvail();
     }
 
-    // Apply the smallest scale that fits the window. Maintain proportions.
-    size = imgui_custom::scale_proportionally(size, width, height, render_integer_scaling);
+    // Skipped while the popout is collapsed -- there is no valid rect to draw
+    // or hit-test against.
+    if (!render_popout || popout_begin) {
 
-    ImGui::Image((ImTextureID)(intptr_t)texture_id, size, ImVec2(0,0), ImVec2(1,1));
-    if (ImGui::IsWindowFocused()) {
-      key_pressed[KeyName::KILL_BUTTON]    = ImGui::IsKeyDown(ImGuiKey_K);
-      key_pressed[KeyName::ENCODER_BUTTON] = ImGui::IsKeyDown(ImGuiKey_Space) || ImGui::IsKeyDown(ImGuiKey_Enter) || ImGui::IsKeyDown(ImGuiKey_RightArrow);
-      key_pressed[KeyName::BACK_BUTTON]    = ImGui::IsKeyDown(ImGuiKey_LeftArrow);
+      // Apply the smallest scale that fits the window. Maintain proportions.
+      size = imgui_custom::scale_proportionally(size, width, height, render_integer_scaling);
 
-      // Turn keypresses (and repeat) into encoder clicks
-      if (up_held) { up_held--; encoder_position--; }
-      else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) up_held = 4;
-      if (down_held) { down_held--; encoder_position++; }
-      else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) down_held = 4;
+      const ImVec2 screen_pos = ImGui::GetCursorScreenPos();
+      ImGui::Image((ImTextureID)(intptr_t)texture_id, size, ImVec2(0,0), ImVec2(1,1));
 
-      if (ImGui::IsItemHovered()) {
-        encoder_position += ImGui::GetIO().MouseWheel > 0 ? 1 : ImGui::GetIO().MouseWheel < 0 ? -1 : 0;
+      // Overlay an invisible button on the screen rect so press-drag-release is
+      // captured by an ImGui *item*. ImGui::Image is not interactive, so a drag
+      // started on it fell through to the window and moved the panel instead,
+      // swallowing the rest of the gesture. An active item also suppresses the
+      // window move, so dragging on the screen no longer drags the window.
+      //
+      // Capture held/rect here, immediately after submitting the button, and
+      // hand them to ui_callback() below. Reading ImGui's "last item" state
+      // inside the callback instead would break as soon as another item is
+      // submitted in between.
+      bool screen_held = false;
+      ImVec2 screen_min(0, 0), screen_max(0, 0);
+      if (size.x > 0.0f && size.y > 0.0f) {
+        ImGui::SetCursorScreenPos(screen_pos);
+        ImGui::InvisibleButton("##screen", size, ImGuiButtonFlags_MouseButtonLeft);
+        screen_held = ImGui::IsItemActive();
+        screen_min  = ImGui::GetItemRectMin();
+        screen_max  = ImGui::GetItemRectMax();
       }
-    }
-    touch->ui_callback();
 
-    if (popout_begin) ImGui::End();
+      if (ImGui::IsWindowFocused()) {
+        key_pressed[KeyName::KILL_BUTTON]    = ImGui::IsKeyDown(ImGuiKey_K);
+        key_pressed[KeyName::ENCODER_BUTTON] = ImGui::IsKeyDown(ImGuiKey_Space) || ImGui::IsKeyDown(ImGuiKey_Enter) || ImGui::IsKeyDown(ImGuiKey_RightArrow);
+        key_pressed[KeyName::BACK_BUTTON]    = ImGui::IsKeyDown(ImGuiKey_LeftArrow);
+
+        // Turn keypresses (and repeat) into encoder clicks
+        if (up_held) { up_held--; encoder_position--; }
+        else if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) up_held = 4;
+        if (down_held) { down_held--; encoder_position++; }
+        else if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) down_held = 4;
+
+        if (ImGui::IsItemHovered()) {
+          encoder_position += ImGui::GetIO().MouseWheel > 0 ? 1 : ImGui::GetIO().MouseWheel < 0 ? -1 : 0;
+        }
+      }
+      touch->ui_callback(screen_held, screen_min, screen_max);
+
+      if (popout_begin) ImGui::End();
+    }
   }
   ImGui::EndChild();
 }

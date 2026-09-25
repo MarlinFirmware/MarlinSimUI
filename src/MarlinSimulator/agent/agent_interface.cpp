@@ -389,6 +389,52 @@ void handle_get_idle(const Request&, Response& response) {
   response.json(writer.str());
 }
 
+// POST /touch — press the touchscreen, as a user would with the mouse.
+//   {"x": 0.5, "y": 0.5}                 tap at panel ratios 0..1
+//   {"x": 0.5, "y": 0.5, "hold_ms": 1500} press-and-hold (simulated ms)
+//
+// Never blocks: the press is released by the device once hold_ms has elapsed
+// AND Marlin has polled it enough times to act on it. Take a screenshot
+// afterwards to see the result.
+void handle_post_touch(const Request& request, Response& response) {
+  JsonValue body;
+  if (!body.parse(request.body)) {
+    response.error(400, "body is not valid JSON");
+    return;
+  }
+
+  double x = -1.0, y = -1.0, hold = 0.0;
+  if (!body.get_double("x", x) || !body.get_double("y", y)) {
+    response.error(400, "'x' and 'y' (ratios 0..1) are required");
+    return;
+  }
+  if (x < 0.0 || x > 1.0 || y < 0.0 || y > 1.0) {
+    response.error(400, "'x' and 'y' must be between 0 and 1");
+    return;
+  }
+  body.get_double("hold_ms", hold);
+  if (hold < 0.0 || hold > 60000.0) {
+    response.error(400, "'hold_ms' must be between 0 and 60000");
+    return;
+  }
+
+  std::string matched;
+  if (!VirtualPrinter::inject_touch(float(x), float(y), uint32_t(hold), matched)) {
+    response.error(404, "no touch device found");
+    return;
+  }
+
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("ok", true);
+  writer.member("device", matched);
+  writer.member("x", x);
+  writer.member("y", y);
+  writer.member("hold_ms", hold);
+  writer.end_object();
+  response.json(writer.str());
+}
+
 // GET /ping — liveness probe that proves the simulation thread is servicing
 // requests (it can only be answered from execute_loop).
 void handle_get_ping(const Request&, Response& response) {
@@ -419,6 +465,7 @@ void register_routes() {
   server.route("GET /idle", handle_get_idle);
   server.route("POST /screenshot", handle_post_screenshot);
   server.route("GET /displays", handle_get_displays);
+  server.route("POST /touch", handle_post_touch);
 
   // Prefix route: any GET /state/<name>.
   server.route_prefix("GET /state/", handle_get_state_component);
