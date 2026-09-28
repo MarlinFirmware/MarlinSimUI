@@ -93,6 +93,10 @@ public:
   // Exact routes always win; prefix routes are tried longest-first.
   void route_prefix(const std::string& key, Handler handler, Affinity affinity = Affinity::Simulation);
 
+  // Rewrite each request (e.g. canonicalize a path) before its route is looked
+  // up. Runs on the server thread, so it must only touch the request.
+  void set_rewriter(std::function<void(Request&)> fn) { rewriter = std::move(fn); }
+
   // Percent-decode a URL path segment ("%20" -> ' ', '+' left as-is).
   static std::string percent_decode(const std::string& text);
 
@@ -123,6 +127,7 @@ private:
 
   std::map<std::string, Route> handlers;
   std::map<std::string, Route> prefix_handlers;
+  std::function<void(Request&)> rewriter;
   std::deque<std::shared_ptr<PendingRequest>> pending;
   std::mutex queue_mutex;
 

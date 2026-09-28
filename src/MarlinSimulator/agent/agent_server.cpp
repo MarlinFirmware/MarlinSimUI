@@ -321,6 +321,7 @@ void AgentServer::execute() {
       response.error(405, "only GET and POST are supported");
     }
     else {
+      if (rewriter) rewriter(request);
       route = find_route(request);
 
       if (route == nullptr) {

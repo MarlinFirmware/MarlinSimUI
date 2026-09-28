@@ -8,6 +8,10 @@
 
 #include <mutex>
 #include <string>
+#include <vector>
+#include <memory>
+#include <future>
+#include <cstdint>
 
 namespace view_control {
 
@@ -42,6 +46,32 @@ inline void post(const Request& r) {
 inline State current() {
   std::scoped_lock lock(mutex);
   return state;
+}
+
+//
+// Viewport capture. The agent thread asks for a frame and waits on the future.
+// Application::render() takes the request after the Viewport is drawn, reads the
+// framebuffer on the UI thread (the only thread with the GL context), and fulfills it.
+// A newer request replaces an older one, whose future then reports a broken promise.
+//
+struct Capture {
+  std::vector<uint8_t> rgb;         // Top row first, 3 bytes per pixel
+  uint32_t width = 0, height = 0;   // 0 if the framebuffer couldn't be read
+};
+
+inline std::shared_ptr<std::promise<Capture>> capture_request;
+
+inline std::future<Capture> request_capture() {
+  std::scoped_lock lock(mutex);
+  capture_request = std::make_shared<std::promise<Capture>>();
+  return capture_request->get_future();
+}
+
+inline std::shared_ptr<std::promise<Capture>> take_capture_request() {
+  std::scoped_lock lock(mutex);
+  auto r = capture_request;
+  capture_request.reset();
+  return r;
 }
 
 } // namespace view_control

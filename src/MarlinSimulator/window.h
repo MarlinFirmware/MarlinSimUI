@@ -2,6 +2,8 @@
 
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cstdint>
 
 #include <gl.h>
 
@@ -45,8 +47,25 @@ struct FrameBuffer {
   virtual void render()                   = 0;
   virtual void unbind()                   = 0;
   virtual GLuint texture_id()             = 0;
+  // Read the rendered (resolved) image as RGB, top row first. Call after render().
+  virtual bool read_rgb(std::vector<uint8_t>& rgb, GLuint& w, GLuint& h) = 0;
 
   virtual ~FrameBuffer() { }
+
+protected:
+  static bool read_fbo_rgb(const GLuint fbo, const GLuint w, const GLuint h, std::vector<uint8_t>& rgb) {
+    if (!fbo || !w || !h) return false;
+    const size_t row = size_t(w) * 3;
+    std::vector<uint8_t> flipped(row * h);
+    renderer::gl_assert_call(glBindFramebuffer, GL_READ_FRAMEBUFFER, fbo);
+    renderer::gl_assert_call(glPixelStorei, GL_PACK_ALIGNMENT, 1);
+    renderer::gl_assert_call(glReadPixels, 0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, flipped.data());
+    renderer::gl_assert_call(glBindFramebuffer, GL_READ_FRAMEBUFFER, 0);
+    rgb.resize(flipped.size());
+    for (GLuint y = 0; y < h; ++y)  // GL rows are bottom-up
+      std::copy_n(&flipped[row * (h - 1 - y)], row, &rgb[row * y]);
+    return true;
+  }
 };
 
 struct MsaaFrameBuffer : public FrameBuffer {
@@ -154,6 +173,12 @@ struct MsaaFrameBuffer : public FrameBuffer {
     return color_attachment_id;
   }
 
+  // The resolved (single-sample) framebuffer holds the image after render()
+  bool read_rgb(std::vector<uint8_t>& rgb, GLuint& w, GLuint& h) {
+    w = width; h = height;
+    return read_fbo_rgb(framebuffer_id, width, height, rgb);
+  }
+
   GLuint framebuffer_id = 0, framebuffer_msaa_id = 0, color_attachment_id = 0, color_attachment_msaa_id = 0, depth_attachment_msaa_id = 0, render_buffer_id = 0,
          width = 0, height = 0;
   GLint msaa_levels = 0;
@@ -229,6 +254,11 @@ struct TextureFrameBuffer : public FrameBuffer {
 
   GLuint texture_id() {
     return color_attachment_id;
+  }
+
+  bool read_rgb(std::vector<uint8_t>& rgb, GLuint& w, GLuint& h) {
+    w = width; h = height;
+    return read_fbo_rgb(framebuffer_id, width, height, rgb);
   }
 
   GLuint framebuffer_id = 0, color_attachment_id = 0, depth_attachment_id = 0, width = 0, height = 0;

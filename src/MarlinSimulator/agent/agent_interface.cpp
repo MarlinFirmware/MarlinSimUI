@@ -15,7 +15,9 @@
 extern MSerialT serial_stream_3;
 
 #include <cstring>
+#include <strings.h>
 #include <chrono>
+#include <future>
 
 
 #if ANY(TFT_INTERFACE_SPI, HAS_MARLINUI_HD44780, HAS_MARLINUI_U8GLIB)
@@ -334,6 +336,7 @@ void handle_post_view(const Request& request, Response& response) {
 //
 // Writing to a caller-supplied path is the point: an agent asks for its own
 // tmp dir, then reads the PNG back with its normal file tools.
+// POST /capture/lcd is an alias.
 void handle_post_screenshot(const Request& request, Response& response) {
   JsonValue body;
   if (!body.parse(request.body)) {
@@ -392,6 +395,85 @@ void handle_get_displays(const Request&, Response& response) {
 }
 
 #endif // HAS_SIM_DISPLAY
+
+//
+// POST /capture/<panel> — capture a panel that renders visuals, by short name.
+// The name is case-insensitive (see canonicalize_request). Supported:
+//   lcd              alias for POST /screenshot (same body)
+//   viewport, vp     the 3D Viewport: {"path": "/tmp/vp.png"}
+// Other panels are added case by case, only for panels that render visuals.
+//
+
+// Lower-case the /capture/<name> segment and resolve aliases, so each panel
+// is one exact route with its own thread affinity.
+void canonicalize_request(Request& request) {
+  constexpr const char* prefix = "/capture/";
+  const size_t n = strlen(prefix);
+  if (request.path.size() <= n || strncasecmp(request.path.c_str(), prefix, n) != 0) return;
+  std::string name = AgentServer::percent_decode(request.path.substr(n));
+  for (auto& c : name) c = char(tolower((unsigned char)c));
+  if (name == "vp") name = "viewport";
+  request.path = prefix + name;
+}
+
+// Read the Viewport framebuffer. The UI thread owns the GL context, so this
+// runs on the server thread and waits for the next rendered frame. It never
+// touches the simulation, so it also works while the simulation is frozen.
+void handle_post_capture_viewport(const Request& request, Response& response) {
+  JsonValue body;
+  if (!body.parse(request.body)) {
+    response.error(400, "body is not valid JSON");
+    return;
+  }
+  std::string path;
+  if (!body.get_string("path", path) || path.empty()) {
+    response.error(400, "'path' is required, e.g. {\"path\": \"/tmp/viewport.png\"}");
+    return;
+  }
+
+  auto future = view_control::request_capture();
+  if (future.wait_for(std::chrono::milliseconds(3000)) != std::future_status::ready) {
+    response.error(503, "the UI did not render a frame in time");
+    return;
+  }
+  view_control::Capture capture;
+  try { capture = future.get(); }
+  catch (const std::future_error&) {
+    response.error(409, "superseded by a newer viewport capture request");
+    return;
+  }
+  if (!capture.width || !capture.height) {
+    response.error(503, "the Viewport has no image yet (is its panel open?)");
+    return;
+  }
+
+  std::string error;
+  if (!write_png_rgb(path, capture.width, capture.height, capture.rgb.data(), error)) {
+    response.error(500, error);
+    return;
+  }
+
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("ok", true);
+  writer.member("path", path);
+  writer.member("display", "Viewport");
+  writer.member("width", double(capture.width));
+  writer.member("height", double(capture.height));
+  writer.member("bytes", double(capture.rgb.size()));
+  writer.end_object();
+  response.json(writer.str());
+}
+
+// Any other /capture/<name>: not a capturable panel (yet)
+void handle_post_capture_other(const Request& request, Response& response) {
+  const std::string name = request.path.substr(strlen("/capture/"));
+  response.error(404, "no capture for '" + name + "'. Supported: "
+    #if HAS_SIM_DISPLAY
+      "lcd, "
+    #endif
+    "viewport (vp)");
+}
 
 // POST /gcode — submit G-code the way a host would.
 //   {"command": "G28"}
@@ -549,11 +631,18 @@ void register_routes() {
 
   #if HAS_SIM_DISPLAY
     server.route("POST /screenshot", handle_post_screenshot);
+    server.route("POST /capture/lcd", handle_post_screenshot);
     server.route("GET /displays", handle_get_displays);
     #if ENABLED(TOUCH_SCREEN)
       server.route("POST /touch", handle_post_touch);
     #endif
   #endif
+
+  // Panel captures by short name. The Viewport is read on the UI thread, so its
+  // handler waits on the server thread and doesn't need the simulation running.
+  server.set_rewriter(canonicalize_request);
+  server.route("POST /capture/viewport", handle_post_capture_viewport, Affinity::Direct);
+  server.route_prefix("POST /capture/", handle_post_capture_other, Affinity::Direct);
 
   // Prefix route: any GET /state/<name>.
   server.route_prefix("GET /state/", handle_get_state_component);

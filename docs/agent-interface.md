@@ -76,6 +76,7 @@ Simulation-thread requests time out with 503 after 5 s of wall-clock time.
 | `GET /displays` | sim | Components that can be captured. |
 | `POST /screenshot` | sim | `{"path":"/abs/file.png"[, "display":"<name>"]}`. Writes a PNG. |
 | `POST /touch` | sim | `{"x":0..1, "y":0..1[, "hold_ms":N]}`. Taps or holds the touchscreen. |
+| `POST /capture/<panel>` | varies | Capture a visual panel to PNG by short name, case-insensitive (see 2.7). |
 | `GET /view` | direct | Current Viewport camera and printer model (see 2.6). |
 | `POST /view` | direct | Set the Viewport camera and/or printer model. Applied on the next UI frame. |
 
@@ -170,8 +171,29 @@ touches the camera), so it works while the simulation is frozen; poll
 `GET /view` to confirm. Errors: 400 for bad JSON, a partial target,
 `distance <= 0`, or an unknown/unavailable machine.
 
-The Viewport itself can't be captured by `POST /screenshot` yet; use the OS
-window capture (e.g. macOS `screencapture`) after setting the view.
+The Viewport is captured with `POST /capture/viewport` (2.7).
+
+### 2.7 Panel capture by name
+
+`POST /capture/<panel>` with `{"path":"/abs/file.png"}` writes a PNG of a panel
+that renders visuals. The panel name is case-insensitive.
+
+| Panel | Aliases | Captures | Thread |
+| --- | --- | --- | --- |
+| `lcd` | | Same as `POST /screenshot`, including the optional `"display"` key. Only in builds with a simulated display | sim |
+| `viewport` | `vp` | The 3D Viewport at its current panel size, as last rendered | UI (the handler waits up to 3 s for the next frame; works while the simulation is frozen) |
+
+The response matches `/screenshot`:
+`{"ok", "path", "display", "width", "height", "bytes"}`.
+
+Errors:
+- 404 for any other panel name. Captures are added case by case, and only for
+  panels that render visuals.
+- 503 if no frame was rendered in time, or the Viewport has no image yet.
+- 409 if a newer Viewport capture replaced this one.
+
+Set up the shot first with `POST /view`. It's applied on the next frame, so it
+lands before, or in the same frame as, the capture.
 
 ---
 

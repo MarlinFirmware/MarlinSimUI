@@ -7,6 +7,7 @@
 #include "logger.h"
 #include "agent/agent_interface.h"
 #include "agent/request_log.h"
+#include "view_control.h"
 
 #include "../HAL.h"
 #include <src/MarlinCore.h>
@@ -377,6 +378,15 @@ void Application::render() {
 
   sim.vis.update();               // Update and render
   sim.vis.framebuffer->render();  // Render and unbind framebuffer
+
+  // Agent Viewport capture (POST /capture/viewport), read here on the GL thread
+  if (auto request = view_control::take_capture_request()) {
+    view_control::Capture capture;
+    GLuint w = 0, h = 0;
+    if (!sim.vis.framebuffer->read_rgb(capture.rgb, w, h)) w = h = 0;
+    capture.width = w; capture.height = h;
+    request->set_value(std::move(capture));
+  }
 
   user_interface.render();
   window.swap_buffers();
