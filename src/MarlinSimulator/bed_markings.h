@@ -1,0 +1,41 @@
+#pragma once
+
+//
+// Bed markings: flat symbols and lines drawn just above the bed surface, in light
+// colors that read well on the dark bed tint.
+//
+//  - The 0,0 origin: white circle with a cross
+//  - The Z_SAFE_HOMING point: yellow circle with an X
+//  - The probeable area: white dashed outline (probe bounds for the live M851 offset)
+//  - The leveling mesh grid: light blue lines (the live mesh, or the grid G29 would probe)
+//
+// Positions come from live Marlin state and are rebuilt when they change.
+//
+
+#include <functional>
+#include <memory>
+#include <vector>
+
+#include <glm/glm.hpp>
+
+#include "renderer/renderer.h"
+
+class BedMarkings {
+public:
+  using BedZ = std::function<float(const glm::vec2)>; // Bed surface height at a Marlin XY
+
+  void create(std::shared_ptr<renderer::ShaderProgram> program);
+
+  // Rebuild when Marlin's inputs changed, or when 'force' is set (the bed surface moved).
+  // Returns true if the mesh was rebuilt.
+  bool update(const BedZ& bed_z, const bool force);
+
+  void set_visible(const bool vis);
+
+  renderer::mesh_id_t mesh {};
+  bool visible = true;
+
+private:
+  std::vector<float> signature;  // The inputs of the last build
+  glm::vec4 no_tint {};          // The default shader's u_tint, which must be set per mesh
+};

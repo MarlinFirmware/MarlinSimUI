@@ -271,7 +271,13 @@ void Visualisation::create() {
     }
   }
 
+  //
+  // Bed markings, on the bed surface
+  //
+  bed_markings.create(default_program);
+
   renderer::render_mesh(m_bed_mesh);
+  renderer::render_mesh(bed_markings.mesh);
   for (auto mesh : m_extruder_mesh) {
     renderer::render_mesh(mesh);
   }
@@ -381,11 +387,22 @@ void Visualisation::update() {
       v.color.b = b;
     }
     print_bed->dirty = false;
+    bed_markings_dirty = true;
   }
   update_heat_tint(print_bed->gradient_enabled);
   if (bed_mesh->m_position != pose.bed_offset) {
     bed_mesh->m_position = pose.bed_offset;
     bed_mesh->m_transform_dirty = true;
+  }
+
+  // Bed markings follow the bed surface and Marlin's probe, mesh and homing settings
+  if (bed_markings.visible) {
+    bed_markings.update([&](const glm::vec2 p) { return print_bed->calculate_z(p); }, bed_markings_dirty);
+    bed_markings_dirty = false;
+    if (auto m = renderer::get_mesh_by_id(bed_markings.mesh); m && m->m_position != pose.bed_offset) {
+      m->m_position = pose.bed_offset;
+      m->m_transform_dirty = true;
+    }
   }
 
   // update the position of the extruder mesh for visualisation
@@ -439,6 +456,7 @@ void Visualisation::update() {
   }
   if (draw_list_update) {
     renderer::render_mesh(m_bed_mesh);
+    renderer::render_mesh(bed_markings.mesh);
     for (auto mesh : m_extruder_mesh) {
       renderer::render_mesh(mesh);
     }
@@ -642,6 +660,10 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
         show_machine = !show_machine;
         machine.set_visible(show_machine);
       }
+      if (ImGui::MenuItem("Bed Markings", nullptr, bed_markings.visible)) {
+        bed_markings.set_visible(!bed_markings.visible);
+        bed_markings_dirty = true;
+      }
       ImGui::Separator();
       for (uint8_t t = 0; t < MACHINE_TYPE_COUNT; ++t) {
         const MachineType type = MachineType(t);
@@ -730,6 +752,7 @@ void Visualisation::apply_view_request() {
     if (r.has_distance) turntable.distance = r.distance;
     if (r.has_target) turntable.target = { r.target[0], r.target[2], -r.target[1] }; // Marlin -> GL
     if (r.has_follow) follow_nozzle = r.follow;
+    if (r.has_markings) { bed_markings.set_visible(r.markings); bed_markings_dirty = true; }
     auto_rotate = false;
   }
   std::scoped_lock lock(view_control::mutex);
@@ -739,6 +762,7 @@ void Visualisation::apply_view_request() {
   s.target[0] = turntable.target.x; s.target[1] = -turntable.target.z; s.target[2] = turntable.target.y;
   s.follow = follow_nozzle;
   s.machine = MachineModel::type_name(machine.type);
+  s.markings = bed_markings.visible;
 }
 
 //

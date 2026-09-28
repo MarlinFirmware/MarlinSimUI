@@ -267,7 +267,7 @@ void handle_post_serial(const Request& request, Response& response) {
 // POST /view — set the Viewport camera (Turntable mode). All keys optional:
 //   {"preset":"home|front|right|back|left|top|iso", "yaw":deg, "pitch":deg,
 //    "distance":mm, "x":mm, "y":mm, "z":mm (target, Marlin coordinates; all three),
-//    "follow":bool, "machine":"bedslinger|cube|delta"}
+//    "follow":bool, "machine":"bedslinger|cube|delta", "markings":bool}
 // Applied on the next UI frame; poll GET /view to confirm.
 void handle_get_view(const Request&, Response& response) {
   const view_control::State v = view_control::current();
@@ -283,6 +283,7 @@ void handle_get_view(const Request&, Response& response) {
   writer.member("y", double(v.target[1]));
   writer.member("z", double(v.target[2]));
   writer.member("follow", v.follow);
+  writer.member("markings", v.markings);
   writer.end_object();
   response.json(writer.str());
 }
@@ -302,6 +303,7 @@ void handle_post_view(const Request& request, Response& response) {
     r.has_distance = true; r.distance = float(d);
   }
   if (body.get_bool("follow", r.follow)) r.has_follow = true;
+  if (body.get_bool("markings", r.markings)) r.has_markings = true;
   body.get_string("preset", r.preset);
   body.get_string("machine", r.machine);
   if (!r.machine.empty()) {

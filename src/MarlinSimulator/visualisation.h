@@ -22,6 +22,7 @@
 
 #include "renderer/renderer.h"
 #include "machine_model.h"
+#include "bed_markings.h"
 
 constexpr glm::ivec2 build_plate_dimension{X_BED_SIZE, Y_BED_SIZE};
 constexpr glm::ivec2 build_plate_offset{X_MIN_POS, Y_MIN_POS};
@@ -198,6 +199,10 @@ public:
 
   MachineModel machine;
   bool show_machine = true;
+
+  // Origin, safe homing point, probeable area and mesh grid, drawn on the bed
+  BedMarkings bed_markings;
+  bool bed_markings_dirty = true; // The bed surface changed (leveling sliders)
   bool render_list_dirty = false;
   void set_machine_type(const MachineType type);
   void apply_view_request();
