@@ -300,8 +300,14 @@ void Visualisation::update() {
   auto effector_pos = extrusion[0].position;
 
   //
-  // Printer model: place the bed and moving parts for the current nozzle position
+  // Printer model: place the bed and moving parts for the current nozzle position.
+  // M218, M501 (EEPROM) etc. can move a hotend, so rebuild the parts to match.
   //
+  if (machine.hotend_layout_changed()) {
+    machine.build(machine.type, lit_program);
+    machine.set_visible(show_machine);
+    render_list_dirty = true;
+  }
   const glm::vec3 nozzle { effector_pos.x, -effector_pos.z, effector_pos.y }; // Back to Marlin XYZ
   MachinePose pose = machine.pose(nozzle);
   if (!show_machine) {

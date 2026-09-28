@@ -6,6 +6,7 @@
 #include "../agent/json.h"
 
 #include <src/inc/MarlinConfig.h>
+#include <src/module/motion.h> // motion.hotend_offset
 
 constexpr float steps_per_unit[] = DEFAULT_AXIS_STEPS_PER_UNIT;
 constexpr bool extruder_invert_dir[EXTRUDERS] = {
@@ -208,23 +209,19 @@ CartesianKinematicSystem::CartesianKinematicSystem(std::function<void(kinematic_
 
 }
 
-#ifdef HOTEND_OFFSET_X
-std::array<double, HOTENDS> hotend_offset_x HOTEND_OFFSET_X;
-#else
-std::array<double, HOTENDS> hotend_offset_x {};
-#endif
-
-#ifdef HOTEND_OFFSET_Y
-std::array<double, HOTENDS> hotend_offset_y HOTEND_OFFSET_Y;
-#else
-std::array<double, HOTENDS> hotend_offset_y {};
-#endif
-
-#ifdef HOTEND_OFFSET_Z
-std::array<double, HOTENDS> hotend_offset_z HOTEND_OFFSET_Z;
-#else
-std::array<double, HOTENDS> hotend_offset_z {};
-#endif
+// Physical offset of hotend h's nozzle, live from Marlin's motion.hotend_offset so M218,
+// M501 (EEPROM), G425 and the LCD all move the simulated nozzle and the rendered hotend.
+glm::vec3 hotend_offset_mm(const size_t h) {
+  #if HOTENDS > 1
+    if (h < HOTENDS) {
+      const xyz_pos_t& o = motion.hotend_offset[h];
+      return { float(o.x), float(o.y), float(o.z) };
+    }
+  #else
+    UNUSED(h);
+  #endif
+  return {};
+}
 
 std::array<glm::vec3, 8> filament_color {
   glm::vec3 {1.0, 0.0, 0.0},
@@ -251,7 +248,7 @@ void CartesianKinematicSystem::kinematic_update() {
 
 #ifdef SINGLENOZZLE
   for (size_t i = 0; i < EXTRUDERS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0] + glm::vec3{hotend_offset_x[0], hotend_offset_y[0], hotend_offset_z[0]}, 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0] + hotend_offset_mm(0), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 #elif defined(DUAL_X_CARRIAGE)
   auto carriage2 = glm::vec3{
@@ -263,7 +260,7 @@ void CartesianKinematicSystem::kinematic_update() {
   state.effector_position[1] = {carriage2, glm::vec4(hardware_offset[1], 0.0f) + glm::vec4(carriage2, extruder[1]), filament_color[1]};
 #else
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 #endif
 
@@ -332,7 +329,7 @@ void CoreXYKinematicSystem::kinematic_update() {
   }
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 
   state.position = state.effector_position[0].position;
@@ -391,7 +388,7 @@ void CoreXZKinematicSystem::kinematic_update() {
   }
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 
   state.position = state.effector_position[0].position;
@@ -449,7 +446,7 @@ void CoreYZKinematicSystem::kinematic_update() {
   }
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 
   state.position = state.effector_position[0].position;
@@ -507,7 +504,7 @@ void CoreYXKinematicSystem::kinematic_update() {
   }
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 
   state.position = state.effector_position[0].position;
@@ -565,7 +562,7 @@ void CoreZXKinematicSystem::kinematic_update() {
   }
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 
   state.position = state.effector_position[0].position;
@@ -623,7 +620,7 @@ void CoreZYKinematicSystem::kinematic_update() {
   }
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
   }
 
   state.position = state.effector_position[0].position;
@@ -776,7 +773,7 @@ void DeltaKinematicSystem::kinematic_update() {
   }
 #else
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4{hotend_offset_x[i], hotend_offset_y[i], hotend_offset_z[i], 0.0} + glm::vec4(cartesian_pos, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(cartesian_pos, extruder[i]), filament_color[i]};
   }
 #endif
 

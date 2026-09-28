@@ -54,10 +54,12 @@ public:
   void queue_render() const;                        // Add all parts to the render list
   void set_visible(const bool visible);
 
-  // Hotends drawn on the carriage / effector, one per HOTEND at its HOTEND_OFFSET
+  // Hotends drawn on the carriage / effector, one per HOTEND at motion.hotend_offset
   static constexpr int max_hotends = 8;
   static int hotend_count();
-  static glm::vec3 hotend_offset(const int h);  // GL offset of hotend h from hotend 0
+  static glm::vec3 live_hotend_offset(const int h);  // GL offset of hotend h from hotend 0, now
+  glm::vec3 hotend_offset(const int h) const { return h > 0 && h < max_hotends ? hotend_layout[h] : glm::vec3(); } // As built
+  bool hotend_layout_changed() const;                // M218 / EEPROM moved a hotend: rebuild
 
   // Per-frame look of hotend h's heater block and nozzle, applied by the lit shader:
   // tint.rgb blended in by tint.a, plus a 'glow' brightness for the active hotend.
@@ -79,6 +81,10 @@ private:
   };
 
   renderer::mesh_id_t add_part(Geometry geometry, Animate animate = nullptr, const bool in_bounds = true);
+  // Shared by every printer type: the carriage / effector part calls add_cold_ends and
+  // sizes itself with hotend_extent; add_hot_parts adds the tintable heater blocks.
+  void hotend_extent(glm::vec3& lo, glm::vec3& hi) const;
+  void add_cold_ends(renderer::Buffer<renderer::vertex_data_t>& b) const;
   void add_hot_parts();  // Heater block + nozzle of every hotend, each its own tintable mesh
   void build_bedslinger();
   void build_cube();
@@ -93,4 +99,5 @@ private:
   float no_glow = 0;
   glm::vec4 hotend_tint[max_hotends] {};
   float hotend_glow[max_hotends] {};
+  glm::vec3 hotend_layout[max_hotends] {};  // hotend_offset(h) when the parts were built
 };

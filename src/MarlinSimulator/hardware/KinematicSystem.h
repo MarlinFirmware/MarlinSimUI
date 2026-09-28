@@ -21,6 +21,9 @@ struct kinematic_state {
   glm::vec3 position {};
 };
 
+// Nozzle offset of hotend h in Marlin XYZ mm (motion.hotend_offset, so M218 / EEPROM apply)
+glm::vec3 hotend_offset_mm(const size_t h);
+
 class KinematicSystem : public VirtualPrinter::Component {
 public:
   KinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update) :  VirtualPrinter::Component("Kinematic System"), on_kinematic_update(on_kinematic_update) {};
