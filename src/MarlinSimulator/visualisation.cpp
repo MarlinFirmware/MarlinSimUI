@@ -16,6 +16,10 @@
 #include "view_control.h"
 
 #include <src/inc/MarlinConfig.h>
+#include <src/module/motion.h>      // motion.extruder: the active tool
+#include <src/module/temperature.h> // Heater targets, which set the full-pink point
+
+#include "hardware/Heater.h"
 
 // Prevent glm::abs confusion
 #undef abs
@@ -144,8 +148,20 @@ void Visualisation::create() {
   for (auto& m : m_extruder_mesh) {
     auto mesh_object = renderer::get_mesh_by_id(m);
     mesh_object->set_shader_program(default_program);
+    mesh_object->m_shader_instance->set_uniform("u_tint", &no_tint); // Uniforms are per program; don't inherit the bed tint
     mesh_object->m_scale = effector_scale;
   }
+
+  //
+  // Heaters for the temperature tint
+  //
+  #if HOTENDS
+    for (int h = 0; h < MachineModel::hotend_count(); ++h)
+      hotend_heaters.push_back(virtual_printer.get_component<Heater>("Hotend" + std::to_string(h) + " Heater"));
+  #endif
+  #if TEMP_SENSOR_BED
+    bed_heater = virtual_printer.get_component<Heater>("Bed Heater");
+  #endif
 
   //
   // Set up the bed plane
@@ -153,6 +169,7 @@ void Visualisation::create() {
   m_bed_mesh = renderer::create_mesh();
   auto mesh_object = renderer::get_mesh_by_id(m_bed_mesh);
   mesh_object->set_shader_program(default_program);
+  mesh_object->m_shader_instance->set_uniform("u_tint", &bed_tint);
   auto bed_mesh_buffer = renderer::Buffer<renderer::vertex_data_t>::create();
   mesh_object->buffer_vector<renderer::vertex_data_t>().push_back(bed_mesh_buffer);
   bed_mesh_buffer->data().reserve((BED_NUM_VERTEXES_PER_AXIS * BED_NUM_VERTEXES_PER_AXIS * 6));
@@ -359,6 +376,7 @@ void Visualisation::update() {
     }
     print_bed->dirty = false;
   }
+  update_heat_tint(print_bed->gradient_enabled);
   if (bed_mesh->m_position != pose.bed_offset) {
     bed_mesh->m_position = pose.bed_offset;
     bed_mesh->m_transform_dirty = true;
@@ -426,6 +444,50 @@ void Visualisation::update() {
   }
 
   renderer::render(camera.proj * camera.view);
+}
+
+//
+// Temperature tint: light blue at ambient blending to pink at the heater's target
+// (or 200°C hotend / 60°C bed while the heater is off, so cooling still shows).
+// The active hotend glows when there's more than one. The leveling gradient, when
+// enabled, owns the bed colours, so the bed tint is dropped.
+//
+// Tint ramps: cold (ambient) -> hot (target). Hotends are light blue -> pink; the bed is
+// darker, deep blue -> deep red, so it doesn't overpower the model. Later: color themes.
+struct HeatRamp { glm::vec3 cold, hot; float strength; };
+static constexpr HeatRamp hotend_ramp { { 0.55f, 0.78f, 1.00f }, { 1.00f, 0.42f, 0.72f }, 0.80f },
+                          bed_ramp    { { 0.12f, 0.24f, 0.55f }, { 0.55f, 0.08f, 0.12f }, 0.85f };
+
+static glm::vec4 heat_tint(const double temp, const double target, const double fallback, const HeatRamp& ramp) {
+  constexpr double ambient = 25;
+  const double full = target > ambient ? target : fallback;
+  const float t = float(glm::clamp((temp - ambient) / (full - ambient), 0.0, 1.0));
+  return glm::vec4(glm::mix(ramp.cold, ramp.hot, t), ramp.strength);
+}
+
+void Visualisation::update_heat_tint(const bool gradient_enabled) {
+  const int count = MachineModel::hotend_count();
+  const int active = std::min(int(motion.extruder), count - 1);
+  for (int h = 0; h < count; ++h) {
+    glm::vec4 tint {};
+    if (h < int(hotend_heaters.size()) && hotend_heaters[h]) {
+      #if HOTENDS
+        const double target = thermalManager.temp_hotend[h].target;
+      #else
+        const double target = 0;
+      #endif
+      tint = heat_tint(hotend_heaters[h]->hotend_temperature, target, 200, hotend_ramp);
+    }
+    machine.set_hotend_look(h, tint, count > 1 && h == active ? 0.6f : 0.0f);
+  }
+
+  bed_tint = {};
+  #if HAS_HEATED_BED
+    if (bed_heater && !gradient_enabled)
+      bed_tint = heat_tint(bed_heater->hotend_temperature, thermalManager.temp_bed.target, 60, bed_ramp);
+  #else
+    UNUSED(gradient_enabled);
+  #endif
 }
 
 void Visualisation::destroy() {

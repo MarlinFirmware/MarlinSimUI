@@ -54,6 +54,15 @@ public:
   void queue_render() const;                        // Add all parts to the render list
   void set_visible(const bool visible);
 
+  // Hotends drawn on the carriage / effector, one per HOTEND at its HOTEND_OFFSET
+  static constexpr int max_hotends = 8;
+  static int hotend_count();
+  static glm::vec3 hotend_offset(const int h);  // GL offset of hotend h from hotend 0
+
+  // Per-frame look of hotend h's heater block and nozzle, applied by the lit shader:
+  // tint.rgb blended in by tint.a, plus a 'glow' brightness for the active hotend.
+  void set_hotend_look(const int h, const glm::vec4 tint, const float glow);
+
   // World-space bounds of the machine at rest, for camera framing
   glm::vec3 bounds_min {}, bounds_max {};
 
@@ -70,10 +79,18 @@ private:
   };
 
   renderer::mesh_id_t add_part(Geometry geometry, Animate animate = nullptr, const bool in_bounds = true);
+  void add_hot_parts();  // Heater block + nozzle of every hotend, each its own tintable mesh
   void build_bedslinger();
   void build_cube();
   void build_delta();
 
   std::vector<Part> parts;
   std::shared_ptr<renderer::ShaderProgram> program;
+
+  // Shader uniforms hold pointers, so these must outlive the meshes. Every part sets
+  // u_tint and u_glow: uniforms are per program, so an unset one keeps the last mesh's value.
+  glm::vec4 no_tint {};
+  float no_glow = 0;
+  glm::vec4 hotend_tint[max_hotends] {};
+  float hotend_glow[max_hotends] {};
 };

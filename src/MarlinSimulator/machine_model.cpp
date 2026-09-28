@@ -1,5 +1,7 @@
 #include "machine_model.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <utility>
@@ -119,17 +121,58 @@ static void add_sphere(VertexBuffer& buf, const glm::vec3 c, const float radius,
     }
 }
 
-// Hotend: heatsink, heater block and nozzle, tip at the origin
-static void add_hotend(VertexBuffer& buf) {
+// Hotend parts. The hot end (nozzle and heater block, tip at the origin) is its own mesh
+// so it can be tinted by temperature; the cold end (heat break and heatsink, over a tip
+// at 'at') is part of the carriage.
+static void add_hotend_hot(VertexBuffer& buf) {
   add_cylinder(buf, {0, 0, 0}, {0, 3, 0}, 1.5f, color::brass, 12);
   add_cylinder(buf, {0, 3, 0}, {0, 6, 0}, 4.0f, color::brass, 6);
   add_box(buf, {-8, 6, -6}, {12, 17, 6}, color::heater);
-  add_cylinder(buf, {0, 17, 0}, {0, 22, 0}, 1.5f, color::rod, 8);
+}
+static void add_hotend_cold(VertexBuffer& buf, const glm::vec3 at) {
+  add_cylinder(buf, at + glm::vec3(0, 17, 0), at + glm::vec3(0, 22, 0), 1.5f, color::rod, 8);
   for (int i = 0; i < 6; ++i) {
     const float y = 22.0f + i * 4.0f;
-    add_cylinder(buf, {0, y, 0}, {0, y + 2.0f, 0}, 11.0f, color::frame, 20);
+    add_cylinder(buf, at + glm::vec3(0, y, 0), at + glm::vec3(0, y + 2.0f, 0), 11.0f, color::frame, 20);
   }
-  add_cylinder(buf, {0, 22, 0}, {0, 46, 0}, 4.0f, color::frame, 12);
+  add_cylinder(buf, at + glm::vec3(0, 22, 0), at + glm::vec3(0, 46, 0), 4.0f, color::frame, 12);
+}
+
+static void move_to(renderer::Mesh& m, const glm::vec3 pos) { m.m_position = pos; }
+
+//
+// Hotends on one carriage, from HOTENDS and HOTEND_OFFSET_X/Y/Z (KinematicSystem.cpp
+// holds the arrays and already puts each extruder's nozzle at its offset).
+// IDEX has a second carriage, which isn't modeled yet, so it draws one hotend.
+//
+extern std::array<double, HOTENDS> hotend_offset_x, hotend_offset_y, hotend_offset_z;
+
+int MachineModel::hotend_count() {
+  #if HOTENDS == 0 || ENABLED(DUAL_X_CARRIAGE)
+    return 1;
+  #else
+    return std::min(HOTENDS, max_hotends);
+  #endif
+}
+
+// Offset of hotend h from hotend 0, Marlin XYZ -> GL (x, z, -y). A +Z offset raises the nozzle.
+glm::vec3 MachineModel::hotend_offset(const int h) {
+  #if HOTENDS > 1 && DISABLED(DUAL_X_CARRIAGE)
+    if (h > 0 && h < HOTENDS)
+      return { float(hotend_offset_x[h] - hotend_offset_x[0]), float(hotend_offset_z[h] - hotend_offset_z[0]), -float(hotend_offset_y[h] - hotend_offset_y[0]) };
+  #else
+    UNUSED(h);
+  #endif
+  return {};
+}
+
+// Carriage-local extent of the hotends' tips, to size the carriage around them
+static void hotend_extent(glm::vec3& lo, glm::vec3& hi) {
+  lo = hi = {};
+  for (int h = 1; h < MachineModel::hotend_count(); ++h) {
+    lo = glm::min(lo, MachineModel::hotend_offset(h));
+    hi = glm::max(hi, MachineModel::hotend_offset(h));
+  }
 }
 
 //
@@ -203,6 +246,8 @@ renderer::mesh_id_t MachineModel::add_part(Geometry geometry, Animate animate, c
   mesh->buffer_vector<vertex_data_t>().push_back(buffer);
   mesh->set_shader_program(program);
   mesh->m_shader_instance->set_uniform("u_model", &mesh->m_transform);
+  mesh->m_shader_instance->set_uniform("u_tint", &no_tint);
+  mesh->m_shader_instance->set_uniform("u_glow", &no_glow);
   mesh->m_visible = visible;
   if (in_bounds)
     for (auto& v : buffer->cdata()) {
@@ -211,6 +256,25 @@ renderer::mesh_id_t MachineModel::add_part(Geometry geometry, Animate animate, c
     }
   parts.push_back({id, animate});
   return id;
+}
+
+// One heater block + nozzle per hotend, each following the nozzle at its offset.
+// Each has its own tint and glow uniforms, updated per frame by set_hotend_look().
+void MachineModel::add_hot_parts() {
+  for (int h = 0; h < hotend_count(); ++h) {
+    const glm::vec3 offset = hotend_offset(h);
+    const auto id = add_part([](VertexBuffer& b) { add_hotend_hot(b); },
+      [offset](renderer::Mesh& m, const MachinePose& p) { move_to(m, p.nozzle_world + offset); }, false);
+    auto mesh = renderer::get_mesh_by_id(id);
+    mesh->m_shader_instance->set_uniform("u_tint", &hotend_tint[h]);
+    mesh->m_shader_instance->set_uniform("u_glow", &hotend_glow[h]);
+  }
+}
+
+void MachineModel::set_hotend_look(const int h, const glm::vec4 tint, const float glow) {
+  if (h < 0 || h >= max_hotends) return;
+  hotend_tint[h] = tint;
+  hotend_glow[h] = glow;
 }
 
 void MachineModel::build(const MachineType new_type, std::shared_ptr<renderer::ShaderProgram> shader) {
@@ -246,10 +310,15 @@ MachinePose MachineModel::pose(const glm::vec3 nozzle) const {
   MachinePose p;
   p.nozzle = nozzle;
   switch (type) {
-    case MACHINE_BEDSLINGER:
-      // The gantry stays in the Y center; the bed slides to put the nozzle over its Y
-      p.bed_offset = { 0, 0, nozzle.y - bed_y * 0.5f };
-      break;
+    case MACHINE_BEDSLINGER: {
+      // The gantry stays in the Y center; the bed slides to put the nozzle over its Y.
+      // Hotends behind hotend 0 (Marlin +Y offset) push the carriage plate back, so the
+      // whole group moves forward by that depth: the rearmost hotend sits where a single
+      // hotend would, and the carriage plate stays centered on the X rods.
+      glm::vec3 lo, hi;
+      hotend_extent(lo, hi);
+      p.bed_offset = { 0, 0, nozzle.y - bed_y * 0.5f - lo.z };
+    } break;
     case MACHINE_CUBE:
       // The nozzle stays at the top; the bed drops as Z increases
       p.bed_offset = { 0, bed_z - nozzle.z, 0 };
@@ -272,8 +341,6 @@ void MachineModel::update(const MachinePose& p) {
       mesh->m_transform_dirty = true;
   }
 }
-
-static void move_to(renderer::Mesh& m, const glm::vec3 pos) { m.m_position = pos; }
 
 //
 // Bedslinger (i3 style), simple geometry sized from the config.
@@ -365,11 +432,19 @@ void MachineModel::build_bedslinger() {
     add_block(b, {screw[0] - 14, (xrod_lo + xrod_hi) * 0.5f, xrod_z - 10 + motor * 0.5f}, {motor, motor, motor}, color::dark);
   }, [](renderer::Mesh& m, const MachinePose& p) { move_to(m, {0, p.nozzle_world.y, 0}); });
 
-  // X carriage and hotend, which follow the nozzle
+  // X carriage and the hotends' cold ends, which follow the nozzle.
+  // The carriage plate spans all the hotends and sits just behind the rearmost one.
   add_part([&](VertexBuffer& b) {
-    add_box(b, {-25, 18, -34}, {25, 88, -10}, color::printed);
-    add_hotend(b);
+    glm::vec3 lo, hi;
+    hotend_extent(lo, hi);
+    const float plate_front = lo.z - 10;
+    add_box(b, {lo.x - 25, lo.y + 18, lo.z - 34}, {hi.x + 25, hi.y + 88, plate_front}, color::printed);
+    for (int h = 0; h < hotend_count(); ++h) add_hotend_cold(b, hotend_offset(h));
+    // Hotends in front of the rearmost one hang from a nozzle holder: one block reaching
+    // forward from the plate at the top of the heatsinks, spanning every hotend in X
+    if (hi.z > lo.z) add_box(b, {lo.x - 12, lo.y + 38, plate_front}, {hi.x + 12, hi.y + 48, hi.z + 12}, color::printed);
   }, [](renderer::Mesh& m, const MachinePose& p) { move_to(m, p.nozzle_world); }, false);
+  add_hot_parts();
 }
 
 //
@@ -444,11 +519,14 @@ void MachineModel::build_cube() {
     }
   }, [](renderer::Mesh& m, const MachinePose& p) { move_to(m, {0, 0, p.nozzle_world.z}); });
 
-  // Toolhead, which follows the nozzle (at the top of the bed travel)
+  // Toolhead, which follows the nozzle (at the top of the bed travel), enclosing every hotend's heatsink
   add_part([&](VertexBuffer& b) {
-    add_box(b, {-28, 30, -28}, {28, 85, 28}, color::printed);
-    add_hotend(b);
+    glm::vec3 lo, hi;
+    hotend_extent(lo, hi);
+    add_box(b, {lo.x - 28, lo.y + 30, lo.z - 28}, {hi.x + 28, hi.y + 85, hi.z + 28}, color::printed);
+    for (int h = 0; h < hotend_count(); ++h) add_hotend_cold(b, hotend_offset(h));
   }, [](renderer::Mesh& m, const MachinePose& p) { move_to(m, p.nozzle_world); }, false);
+  add_hot_parts();
 }
 
 //
@@ -557,6 +635,7 @@ void MachineModel::build_delta() {
       add_cylinder(b, mid - tangent * bar_half, mid + tangent * bar_half, bar_r, color::printed, 12);
       for (const float side : {-1.0f, 1.0f}) add_sphere(b, mid + tangent * (arm_spacing * side), ball_r, color::joint);
     }
-    add_hotend(b);
+    for (int h = 0; h < hotend_count(); ++h) add_hotend_cold(b, hotend_offset(h));
   }, [](renderer::Mesh& m, const MachinePose& p) { move_to(m, p.nozzle_world); }, false);
+  add_hot_parts();
 }

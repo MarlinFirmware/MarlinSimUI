@@ -190,12 +190,13 @@ static const char * data_shader_default_fs = R"SHADERSTR(
   in vec3 v_normal;
   in vec3 v_position;
   out vec4 o_color;
+  uniform vec4 u_tint; // Per-mesh recolor: rgb blended over the vertex color by a (bed temperature)
   void main() {
       if(v_color.a < 0.1) {
         //discard;
         o_color = vec4(0.0, 0.0, 1.0, 1.0);
       } else {
-        o_color = v_color;
+        o_color = vec4(mix(v_color.rgb, u_tint.rgb, u_tint.a), v_color.a);
       }
   })SHADERSTR";
 
@@ -220,6 +221,8 @@ static const char * data_shader_lit_fs = R"SHADERSTR(
   in vec4 v_color;
   in vec3 v_normal;
   out vec4 o_color;
+  uniform vec4 u_tint;  // Per-mesh recolor: rgb blended over the vertex color by a
+  uniform float u_glow; // Per-mesh self-illumination, 0..1 (highlights the active hotend)
   void main() {
       const vec3 key_dir = normalize(vec3(0.45, 1.0, 0.65));  // From above, front-right
       const vec3 fill_dir = normalize(vec3(-0.6, 0.3, -0.4)); // Soft fill from back-left
@@ -227,7 +230,9 @@ static const char * data_shader_lit_fs = R"SHADERSTR(
       float key = dot(n, key_dir) * 0.5 + 0.5;
       float fill = max(dot(n, fill_dir), 0.0);
       float light = 0.25 + 0.7 * key * key + 0.2 * fill;
-      o_color = vec4(v_color.rgb * light, v_color.a);
+      light = mix(light, 1.15, u_glow);
+      vec3 base = mix(v_color.rgb, u_tint.rgb, u_tint.a);
+      o_color = vec4(min(base * light, vec3(1.0)), v_color.a);
   })SHADERSTR";
 
 }

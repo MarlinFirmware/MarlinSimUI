@@ -202,6 +202,13 @@ public:
   void set_machine_type(const MachineType type);
   void apply_view_request();
 
+  // Temperature tint (light blue cold -> pink hot) for the bed surface and each hotend's
+  // heater block and nozzle, plus a glow on the active hotend. See update_heat_tint().
+  std::vector<std::shared_ptr<class Heater>> hotend_heaters;
+  std::shared_ptr<class Heater> bed_heater;
+  glm::vec4 bed_tint {}, no_tint {};
+  void update_heat_tint(const bool gradient_enabled);
+
   bool mouse_captured = false;
   glm::vec<2, int> mouse_lock_pos;
 
