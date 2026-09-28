@@ -165,7 +165,7 @@ target.
 | `x`, `y`, `z` | Camera target in Marlin coordinates (mm). All three or none. |
 | `follow` | `true` keeps the nozzle at the view center. |
 | `machine` | `bedslinger`, `cube` or `delta`; same availability rule as `--machine`. |
-| `markings` | `true`/`false` shows or hides the bed markings (origin, safe homing point, probeable area, mesh grid), like Printer > Bed Markings. |
+| `markings` | `true`/`false` shows or hides the bed markings (origin, safe homing point, probeable area, tool reach, mesh grid), like Printer > Bed Markings. |
 
 The request is queued and applied on the next UI frame (the agent thread never
 touches the camera), so it works while the simulation is frozen; poll

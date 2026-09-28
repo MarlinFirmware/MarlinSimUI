@@ -1,5 +1,5 @@
 //
-// Bed markings: origin, safe homing point, probeable area, leveling mesh grid.
+// Bed markings: origin, safe homing point, probeable area, tool reach, leveling mesh grid.
 // See bed_markings.h.
 //
 
@@ -18,6 +18,7 @@
 #if HAS_LEVELING
   #include <src/feature/bedlevel/bedlevel.h>
 #endif
+#include <src/module/motion.h>
 
 #undef abs
 #undef min
@@ -32,12 +33,15 @@ namespace {
 constexpr glm::vec4 col_origin { 1.00f, 1.00f, 1.00f, 1.0f },  // White
                     col_home   { 1.00f, 0.88f, 0.20f, 1.0f },  // Yellow
                     col_probe  { 0.95f, 0.95f, 0.95f, 1.0f },  // White (dashed)
+                    col_reach  { 1.00f, 0.70f, 0.40f, 1.0f },  // Light orange (dashed)
+                    col_reach_off { 0.75f, 0.38f, 0.10f, 1.0f },  // Darker orange: soft endstops off (M211 S0)
                     col_grid   { 0.55f, 0.80f, 1.00f, 1.0f };  // Light blue
 
 constexpr float lift = 0.2f;       // Above the bed surface, clear of depth fighting
 constexpr float symbol_r = 5.0f,   // Origin / safe-home circle radius
                 symbol_w = 0.8f,   // Symbol stroke width
                 probe_w = 0.8f,    // Probe area outline width
+                reach_w = 0.8f,    // Tool reach outline width
                 grid_w = 0.5f,     // Mesh grid line width
                 dash = 6.0f, gap = 4.0f;
 
@@ -125,8 +129,24 @@ struct Inputs {
   std::vector<float> grid_x, grid_y;
   bool has_home = false;
   glm::vec2 home {};
+  bool has_reach = false, reach_on = false;
+  glm::vec2 reach_min {}, reach_max {};
+  float reach_radius = 0;
 
   void gather() {
+    // Where the active tool can go: the software endstops (native coordinates), which
+    // follow the active tool's offset (T, M218) and IDEX modes. M211 turns them on/off.
+    #if HAS_SOFTWARE_ENDSTOPS
+      has_reach = true;
+      reach_on = motion.soft_endstop._enabled;    // M211 S0/S1 (not the brief "loose" state)
+      reach_min = { motion.soft_endstop.min.x, motion.soft_endstop.min.y };
+      reach_max = { motion.soft_endstop.max.x, motion.soft_endstop.max.y };
+      #if IS_KINEMATIC
+        // The radius Marlin clamps XY moves to (see Motion::update_software_endstops)
+        reach_radius = std::min({ std::abs(std::max(reach_min.x, reach_min.y)), reach_max.x, reach_max.y });
+      #endif
+    #endif
+
     #if HAS_BED_PROBE
       has_probe_area = true;
       probe_min = { probe.min_x(), probe.min_y() };
@@ -168,7 +188,8 @@ struct Inputs {
 
   std::vector<float> signature() const {
     std::vector<float> s { float(has_probe_area), probe_min.x, probe_min.y, probe_max.x, probe_max.y, probe_radius,
-                           float(has_home), home.x, home.y, float(grid_x.size()), float(grid_y.size()) };
+                           float(has_home), home.x, home.y, float(has_reach), float(reach_on), reach_min.x, reach_min.y, reach_max.x, reach_max.y,
+                           float(grid_x.size()), float(grid_y.size()) };
     s.insert(s.end(), grid_x.begin(), grid_x.end());
     s.insert(s.end(), grid_y.begin(), grid_y.end());
     return s;
@@ -206,6 +227,20 @@ bool BedMarkings::update(const BedZ& bed_z, const bool force) {
                 y0 = in.grid_y.front(), y1 = in.grid_y.back();
     for (const float x : in.grid_x) p.line({x, y0}, {x, y1}, grid_w, col_grid);
     for (const float y : in.grid_y) p.line({x0, y}, {x1, y}, grid_w, col_grid);
+  }
+
+  // Tool reach: dashed outline of the software endstops, darker when M211 has them off
+  if (in.has_reach) {
+    const glm::vec4& col = in.reach_on ? col_reach : col_reach_off;
+    #if IS_KINEMATIC
+      p.ring({float(X_CENTER), float(Y_CENTER)}, in.reach_radius, reach_w, col, true);
+    #else
+      const glm::vec2 a = in.reach_min, c = in.reach_max, b { c.x, a.y }, d { a.x, c.y };
+      p.dashed(a, b, reach_w, col);
+      p.dashed(b, c, reach_w, col);
+      p.dashed(c, d, reach_w, col);
+      p.dashed(d, a, reach_w, col);
+    #endif
   }
 
   if (in.has_probe_area) {
