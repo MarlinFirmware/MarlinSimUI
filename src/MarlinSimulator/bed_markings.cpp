@@ -4,6 +4,7 @@
 //
 
 #include "bed_markings.h"
+#include "delta_reach.h"
 
 #include <algorithm>
 #include <cmath>
@@ -74,6 +75,11 @@ struct Painter {
     tri(a, c, d, col);
   }
 
+  // A closed polyline of strokes
+  void loop(const std::vector<glm::vec2>& pts, const float w, const glm::vec4& col) {
+    for (size_t i = 0; i < pts.size(); ++i) line(pts[i], pts[(i + 1) % pts.size()], w, col);
+  }
+
   // A straight stroke, split into short pieces so it follows a tilted or leveled bed
   void line(const glm::vec2 a, const glm::vec2 b, const float w, const glm::vec4& col) {
     const glm::vec2 d = b - a;
@@ -96,7 +102,7 @@ struct Painter {
   }
 
   void ring(const glm::vec2 c, const float r, const float w, const glm::vec4& col, const bool dashes=false) {
-    const int sides = std::max(24, int(r * 0.6f));
+    const int sides = std::max(24, int(glm::two_pi<float>() * r / 2.0f)); // ~2mm pieces, so dashes don't alias
     const float ri = r - w * 0.5f, ro = r + w * 0.5f, step = glm::two_pi<float>() / sides;
     for (int i = 0; i < sides; ++i) {
       const float a0 = i * step, a1 = a0 + step;
@@ -132,6 +138,8 @@ struct Inputs {
   bool has_reach = false, reach_on = false;
   glm::vec2 reach_min {}, reach_max {};
   float reach_radius = 0;
+  glm::vec2 reach_center {};      // Kinematic: soft endstop circle center (the active tool's offset)
+  std::vector<glm::vec2> physical; // Delta: where the active tool can physically reach, on the bed
 
   void gather() {
     // Where the active tool can go: the software endstops (native coordinates), which
@@ -142,9 +150,26 @@ struct Inputs {
       reach_min = { motion.soft_endstop.min.x, motion.soft_endstop.min.y };
       reach_max = { motion.soft_endstop.max.x, motion.soft_endstop.max.y };
       #if IS_KINEMATIC
-        // The radius Marlin clamps XY moves to (see Motion::update_software_endstops)
+        // The radius Marlin clamps XY moves to (see Motion::update_software_endstops).
+        // Motion::apply_limits clamps (target - hotend offset), so it's centered on the offset.
         reach_radius = std::min({ std::abs(std::max(reach_min.x, reach_min.y)), reach_max.x, reach_max.y });
+        #if HAS_HOTEND_OFFSET && ENABLED(DELTA)
+          reach_center = { motion.active_hotend_offset().x, motion.active_hotend_offset().y };
+        #else
+          reach_center = { float(X_CENTER), float(Y_CENTER) };
+        #endif
       #endif
+    #endif
+
+    // Delta: the arms and carriages limit the nozzle to a rounded triangle
+    #if ENABLED(DELTA)
+      DeltaReach dr;
+      dr.gather();
+      constexpr int steps = 180;
+      for (int j = 0; j < steps; ++j) {
+        const float a = glm::two_pi<float>() * j / steps;
+        physical.push_back(dr.offset + glm::vec2(std::cos(a), std::sin(a)) * dr.radius(a));
+      }
     #endif
 
     #if HAS_BED_PROBE
@@ -189,7 +214,8 @@ struct Inputs {
   std::vector<float> signature() const {
     std::vector<float> s { float(has_probe_area), probe_min.x, probe_min.y, probe_max.x, probe_max.y, probe_radius,
                            float(has_home), home.x, home.y, float(has_reach), float(reach_on), reach_min.x, reach_min.y, reach_max.x, reach_max.y,
-                           float(grid_x.size()), float(grid_y.size()) };
+                           reach_center.x, reach_center.y, float(grid_x.size()), float(grid_y.size()), float(physical.size()) };
+    for (const auto& p : physical) s.insert(s.end(), { p.x, p.y });
     s.insert(s.end(), grid_x.begin(), grid_x.end());
     s.insert(s.end(), grid_y.begin(), grid_y.end());
     return s;
@@ -225,15 +251,40 @@ bool BedMarkings::update(const BedZ& bed_z, const bool force) {
   if (!in.grid_x.empty() && !in.grid_y.empty()) {
     const float x0 = in.grid_x.front(), x1 = in.grid_x.back(),
                 y0 = in.grid_y.front(), y1 = in.grid_y.back();
-    for (const float x : in.grid_x) p.line({x, y0}, {x, y1}, grid_w, col_grid);
-    for (const float y : in.grid_y) p.line({x0, y}, {x1, y}, grid_w, col_grid);
+    #if IS_KINEMATIC
+      // G29 only probes inside the probe radius; clip the lines to it
+      if (in.round_area) {
+        const glm::vec2 c { float(X_CENTER), float(Y_CENTER) };
+        const float r2 = in.probe_radius * in.probe_radius;
+        for (const float x : in.grid_x) {
+          const float h2 = r2 - (x - c.x) * (x - c.x);
+          if (h2 <= 0) continue;
+          const float h = std::sqrt(h2);
+          p.line({x, std::max(y0, c.y - h)}, {x, std::min(y1, c.y + h)}, grid_w, col_grid);
+        }
+        for (const float y : in.grid_y) {
+          const float h2 = r2 - (y - c.y) * (y - c.y);
+          if (h2 <= 0) continue;
+          const float h = std::sqrt(h2);
+          p.line({std::max(x0, c.x - h), y}, {std::min(x1, c.x + h), y}, grid_w, col_grid);
+        }
+      }
+      else
+    #endif
+    {
+      for (const float x : in.grid_x) p.line({x, y0}, {x, y1}, grid_w, col_grid);
+      for (const float y : in.grid_y) p.line({x0, y}, {x1, y}, grid_w, col_grid);
+    }
   }
+
+  // Delta: the physical reach of the active tool (solid), with the soft endstops inside it (dashed)
+  if (!in.physical.empty()) p.loop(in.physical, reach_w, col_reach);
 
   // Tool reach: dashed outline of the software endstops, darker when M211 has them off
   if (in.has_reach) {
     const glm::vec4& col = in.reach_on ? col_reach : col_reach_off;
     #if IS_KINEMATIC
-      p.ring({float(X_CENTER), float(Y_CENTER)}, in.reach_radius, reach_w, col, true);
+      p.ring(in.reach_center, in.reach_radius, reach_w, col, true);
     #else
       const glm::vec2 a = in.reach_min, c = in.reach_max, b { c.x, a.y }, d { a.x, c.y };
       p.dashed(a, b, reach_w, col);

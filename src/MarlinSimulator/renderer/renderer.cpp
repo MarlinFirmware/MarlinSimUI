@@ -75,8 +75,20 @@ void destroy() {
 
 void render(glm::mat4 global_transform) {
   if (active_render_list != nullptr) {
+    bool translucent = false;
     for (auto& mesh : *active_render_list) {
-      mesh->render(global_transform);
+      if (mesh->m_translucent) translucent = true;
+      else mesh->render(global_transform);
+    }
+    // Translucent meshes last, so everything behind them is already drawn
+    if (translucent) {
+      gl_assert_call(glEnable, GL_BLEND);
+      gl_assert_call(glBlendFunc, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      gl_assert_call(glDepthMask, GL_FALSE);
+      for (auto& mesh : *active_render_list)
+        if (mesh->m_translucent) mesh->render(global_transform);
+      gl_assert_call(glDepthMask, GL_TRUE);
+      gl_assert_call(glDisable, GL_BLEND);
     }
   }
 

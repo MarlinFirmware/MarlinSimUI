@@ -275,9 +275,11 @@ void Visualisation::create() {
   // Bed markings, on the bed surface
   //
   bed_markings.create(default_program);
+  reach_volume.create(lit_program);
 
   renderer::render_mesh(m_bed_mesh);
   renderer::render_mesh(bed_markings.mesh);
+  renderer::render_mesh(reach_volume.mesh);
   for (auto mesh : m_extruder_mesh) {
     renderer::render_mesh(mesh);
   }
@@ -405,6 +407,9 @@ void Visualisation::update() {
     }
   }
 
+  // Delta printable volume follows the active tool and Marlin's delta settings
+  reach_volume.update();
+
   // update the position of the extruder mesh for visualisation
   size_t mesh_id = 0;
   bool draw_list_update = false;
@@ -457,6 +462,7 @@ void Visualisation::update() {
   if (draw_list_update) {
     renderer::render_mesh(m_bed_mesh);
     renderer::render_mesh(bed_markings.mesh);
+    renderer::render_mesh(reach_volume.mesh);
     for (auto mesh : m_extruder_mesh) {
       renderer::render_mesh(mesh);
     }
@@ -656,14 +662,11 @@ void Visualisation::ui_viewport_menu_callback(UiWindow*) {
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Printer")) {
-      if (ImGui::MenuItem("Show Printer", nullptr, show_machine)) {
-        show_machine = !show_machine;
-        machine.set_visible(show_machine);
-      }
-      if (ImGui::MenuItem("Bed Markings", nullptr, bed_markings.visible)) {
-        bed_markings.set_visible(!bed_markings.visible);
-        bed_markings_dirty = true;
-      }
+      if (ImGui::MenuItem("Show Printer", "P", show_machine)) toggle_printer();
+      if (ImGui::MenuItem("Bed Markings", "M", bed_markings.visible)) toggle_markings();
+      #if ENABLED(DELTA)
+        if (ImGui::MenuItem("Printable Volume", "V", reach_volume.visible)) toggle_volume();
+      #endif
       ImGui::Separator();
       for (uint8_t t = 0; t < MACHINE_TYPE_COUNT; ++t) {
         const MachineType type = MachineType(t);
@@ -753,6 +756,7 @@ void Visualisation::apply_view_request() {
     if (r.has_target) turntable.target = { r.target[0], r.target[2], -r.target[1] }; // Marlin -> GL
     if (r.has_follow) follow_nozzle = r.follow;
     if (r.has_markings) { bed_markings.set_visible(r.markings); bed_markings_dirty = true; }
+    if (r.has_volume) reach_volume.set_visible(r.volume);
     auto_rotate = false;
   }
   std::scoped_lock lock(view_control::mutex);
@@ -763,6 +767,7 @@ void Visualisation::apply_view_request() {
   s.follow = follow_nozzle;
   s.machine = MachineModel::type_name(machine.type);
   s.markings = bed_markings.visible;
+  s.volume = reach_volume.visible;
 }
 
 //
@@ -827,6 +832,19 @@ void Visualisation::set_camera_mode(const CameraMode mode) {
   else
     turntable_apply();
   camera_mode = mode;
+}
+
+// Printer menu toggles, also on the P / M / V keys
+void Visualisation::toggle_printer() {
+  show_machine = !show_machine;
+  machine.set_visible(show_machine);
+}
+void Visualisation::toggle_markings() {
+  bed_markings.set_visible(!bed_markings.visible);
+  bed_markings_dirty = true;
+}
+void Visualisation::toggle_volume() {
+  TERN_(DELTA, reach_volume.set_visible(!reach_volume.visible));
 }
 
 // Left-drag rotates the printer, right/middle-drag pans, wheel zooms.
@@ -983,6 +1001,13 @@ void Visualisation::ui_viewport_callback(UiWindow* window) {
     turntable_input(viewport, delta);
   else
     fly_input(viewport, delta);
+
+  // Show / hide keys, in either camera mode
+  if (viewport.focused) {
+    if (ImGui::IsKeyPressed(ImGuiKey_P, false)) toggle_printer();
+    if (ImGui::IsKeyPressed(ImGuiKey_M, false)) toggle_markings();
+    if (ImGui::IsKeyPressed(ImGuiKey_V, false)) toggle_volume();
+  }
 
   //
   // Render the “Extrusion Settings” popup

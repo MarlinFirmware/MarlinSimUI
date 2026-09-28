@@ -16,11 +16,12 @@
 namespace view_control {
 
 struct Request {
-  bool has_yaw = false, has_pitch = false, has_distance = false, has_target = false, has_follow = false, has_markings = false;
+  bool has_yaw = false, has_pitch = false, has_distance = false, has_target = false, has_follow = false, has_markings = false, has_volume = false;
   float yaw = 0, pitch = 0, distance = 0;
   float target[3] {};  // Marlin coordinates (mm)
   bool follow = false;
   bool markings = true; // Bed markings shown
+  bool volume = false;  // Delta printable volume shown
   std::string preset;  // home, front, right, back, left, top, iso
   std::string machine; // bedslinger, cube, delta
 };
@@ -31,6 +32,7 @@ struct State {
   bool follow = false;
   bool turntable = true;
   bool markings = true;
+  bool volume = false;
   std::string machine;
 };
 

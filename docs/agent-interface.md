@@ -151,7 +151,7 @@ belief — the difference between the two is usually the bug.
 ### 2.6 Viewport camera and printer model
 
 `GET /view` returns `{"ok", "mode": "turntable"|"fly", "machine", "yaw",
-"pitch", "distance", "x", "y", "z", "follow", "markings"}`. `x`,`y`,`z` is the camera
+"pitch", "distance", "x", "y", "z", "follow", "markings", "volume"}`. `x`,`y`,`z` is the camera
 target.
 
 `POST /view` switches to the Turntable camera and applies any of these keys
@@ -166,6 +166,7 @@ target.
 | `follow` | `true` keeps the nozzle at the view center. |
 | `machine` | `bedslinger`, `cube` or `delta`; same availability rule as `--machine`. |
 | `markings` | `true`/`false` shows or hides the bed markings (origin, safe homing point, probeable area, tool reach, mesh grid), like Printer > Bed Markings. |
+| `volume` | `true`/`false` shows or hides the translucent printable volume of the active tool, like Printer > Printable Volume. DELTA builds only; always `false` otherwise. |
 
 The request is queued and applied on the next UI frame (the agent thread never
 touches the camera), so it works while the simulation is frozen; poll

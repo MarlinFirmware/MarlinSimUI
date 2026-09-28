@@ -23,6 +23,7 @@
 #include "renderer/renderer.h"
 #include "machine_model.h"
 #include "bed_markings.h"
+#include "delta_reach.h"
 
 constexpr glm::ivec2 build_plate_dimension{X_BED_SIZE, Y_BED_SIZE};
 constexpr glm::ivec2 build_plate_offset{X_MIN_POS, Y_MIN_POS};
@@ -178,6 +179,9 @@ public:
   void set_camera_mode(const CameraMode mode);
   void turntable_input(struct Viewport& viewport, const float delta);
   void fly_input(struct Viewport& viewport, const float delta);
+  void toggle_printer();
+  void toggle_markings();
+  void toggle_volume();
 
   FollowMode follow_mode = FOLLOW_NONE;
   bool render_full_path = true;
@@ -203,6 +207,9 @@ public:
   // Origin, safe homing point, probeable area and mesh grid, drawn on the bed
   BedMarkings bed_markings;
   bool bed_markings_dirty = true; // The bed surface changed (leveling sliders)
+
+  // Delta: translucent printable volume of the active tool
+  ReachVolume reach_volume;
   bool render_list_dirty = false;
   void set_machine_type(const MachineType type);
   void apply_view_request();

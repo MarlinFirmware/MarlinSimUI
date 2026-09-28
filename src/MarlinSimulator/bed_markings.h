@@ -8,7 +8,8 @@
 //  - The Z_SAFE_HOMING point: yellow circle with an X
 //  - The probeable area: white dashed outline (probe bounds for the live M851 offset)
 //  - The active tool's reach: orange dashed outline of the live software endstops,
-//    light orange when enabled, darker orange when M211 has them off
+//    light orange when enabled, darker orange when M211 has them off. On a Delta also
+//    a solid light orange rounded triangle: where the arms let the active tool reach.
 //  - The leveling mesh grid: light blue lines (the live mesh, or the grid G29 would probe)
 //
 // Positions come from live Marlin state and are rebuilt when they change.

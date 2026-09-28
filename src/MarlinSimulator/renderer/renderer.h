@@ -405,6 +405,7 @@ public:
   glm::vec3 m_scale {1.0, 1.0, 1.0};
   glm::quat m_rotation {};
   bool m_visible         = true;
+  bool m_translucent     = false; // Drawn after opaque meshes, blended, without depth writes
   bool m_transform_dirty = true;
   bool m_shader_dirty    = true;
   bool m_delete          = false;
