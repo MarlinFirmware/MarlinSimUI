@@ -26,7 +26,11 @@
 
 namespace webcam {
 
-constexpr uint16_t default_port = 8101;
+constexpr uint16_t default_port = 8101;   // for the default serial port 8099; see set_default_port()
+
+// The port the Viewport menu uses when none was given. main() sets it to the serial port + 2, so
+// two simulators with different --serial-port values get different webcam ports too.
+void set_default_port(uint16_t port);
 
 // Start listening. port 0 keeps the last port (or default_port). Returns false if the
 // socket can't be opened. Safe to call when already enabled.

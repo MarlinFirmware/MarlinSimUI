@@ -141,7 +141,8 @@ your configuration (bed size, Z height, delta geometry).
 
 The Viewport can act as a printer webcam, so a host such as OctoPrint or Mainsail can show it. It is
 off by default. Turn it on from the Viewport's **Webcam** menu, or start the simulator with
-`--webcam-port <n>` (or `MARLIN_SIM_WEBCAM_PORT`; the menu uses port 8101 if none is given).
+`--webcam-port <n>` (or `MARLIN_SIM_WEBCAM_PORT`). The Viewport menu uses the serial port + 2 (8101 for the default
+8099), so two simulators started with different `--serial-port` values never collide.
 
 | URL | Serves |
 | --- | --- |

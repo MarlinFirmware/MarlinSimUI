@@ -61,6 +61,7 @@ struct Frame {
 
 std::atomic_bool running { false };
 std::atomic<uint16_t> listen_port { 0 };
+std::atomic<uint16_t> fallback_port { default_port };
 std::atomic<uint32_t> clients { 0 };
 std::atomic<int64_t> last_demand { -1000000 };
 std::atomic<int64_t> last_capture { -1000000 };
@@ -236,7 +237,7 @@ bool enable(uint16_t port) {
   std::scoped_lock lock(state_mutex);
   if (running.load()) return true;
   if (port) listen_port = port;
-  else if (!listen_port) listen_port = default_port;
+  else if (!listen_port) listen_port = fallback_port.load();
 
   socket_t l = ::socket(AF_INET, SOCK_STREAM, 0);
   if (l == BAD_SOCKET) { fprintf(stderr, "Webcam: socket() failed\n"); return false; }
@@ -281,7 +282,8 @@ void disable() {
 void shutdown() { disable(); }
 
 bool enabled() { return running.load(); }
-uint16_t port() { return listen_port.load() ? listen_port.load() : default_port; }
+uint16_t port() { return listen_port.load() ? listen_port.load() : fallback_port.load(); }
+void set_default_port(uint16_t p) { if (p) fallback_port = p; }
 uint32_t client_count() { return clients.load(); }
 
 bool wants_frame() {

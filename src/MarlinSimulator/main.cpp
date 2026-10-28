@@ -79,7 +79,7 @@ static void print_usage(const char* argv0) {
   printf("  --agent-port <n>    Enable the HTTP agent control interface on 127.0.0.1:<n>\n");
   printf("                      (also settable via MARLIN_SIM_AGENT_PORT)\n");
   printf("  --webcam-port <n>   Serve the Viewport as a webcam on port <n> (snapshot and MJPEG stream)\n");
-  printf("                      (also settable via MARLIN_SIM_WEBCAM_PORT). Off by default; default port %u\n", unsigned(webcam::default_port));
+  printf("                      (also settable via MARLIN_SIM_WEBCAM_PORT). Off by default; the Viewport menu uses the serial port + 2\n");
   printf("  --no-audio          Disable audio/buzzer emulation\n");
   printf("  --machine <type>    Printer model in the Viewport: bedslinger, cube, delta, scara, belt\n");
   printf("                      (default: from the Marlin configuration; DELTA, SCARA and BELTPRINTER builds allow only their own)\n");
@@ -187,6 +187,7 @@ int main(int argc, char** argv) {
     agent::server.start(options.agent_port);  // non-fatal on failure
   }
 
+  webcam::set_default_port(uint16_t(options.serial_port + 2));
   if (options.webcam_port) webcam::enable(options.webcam_port);  // non-fatal on failure
 
   Application app;
