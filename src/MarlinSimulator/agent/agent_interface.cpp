@@ -36,6 +36,13 @@ extern MSerialT serial_stream_0, serial_stream_1, serial_stream_2, serial_stream
   #define HAS_SIM_DISPLAY 1
 #endif
 
+// Watchdog emulation state (marlin_hal_impl/HAL.cpp)
+namespace SimWatchdog {
+  extern bool enabled;
+  extern uint64_t last_refresh_ms, max_gap_ms, reset_gap_ms;
+  extern uint32_t resets;
+}
+
 namespace agent {
 
 AgentServer server;
@@ -59,6 +66,14 @@ void write_kernel_state(JsonWriter& writer) {
   writer.member("isr_timing_error_ns", Kernel::isr_timing_error.load());
   writer.member("timers_active", Kernel::timers_active);
   writer.member("quit_requested", Kernel::quit_requested);
+
+  writer.key("watchdog");
+  writer.begin_object();
+  writer.member("enabled", SimWatchdog::enabled);
+  writer.member("resets", uint64_t(SimWatchdog::resets));
+  writer.member("max_gap_ms", SimWatchdog::max_gap_ms);
+  writer.member("reset_gap_ms", SimWatchdog::reset_gap_ms);
+  writer.end_object();
 
   writer.key("timers");
   writer.begin_array();

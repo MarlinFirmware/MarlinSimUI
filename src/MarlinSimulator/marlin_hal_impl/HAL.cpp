@@ -77,11 +77,57 @@ void MarlinHAL::reboot() {
 
 void MarlinHAL::idletask() {  Kernel::yield(); };
 
+//
+// Watchdog emulation
+//
+// Marlin enables the watchdog (USE_WATCHDOG) and promises to call hal.watchdog_refresh() often. A real
+// board resets itself when that doesn't happen for WDT_TIMEOUT. The simulator can't restart Marlin, so it
+// reports the reset (stdout and the agent /kernel state) and requests a quit, which stops Marlin the
+// same way a reboot would. Time is Marlin's clock, so the result doesn't depend on realtime_scale.
+// Set MARLIN_SIM_WATCHDOG=0 to turn the emulation off.
+//
+namespace SimWatchdog {
+  constexpr uint64_t timeout_ms = TERN(WATCHDOG_DURATION_8S, 8000, 4000);
+  bool enabled = false;               // Marlin has called watchdog_init() and the emulation is on
+  uint64_t last_refresh_ms = 0;       // Marlin time of the latest refresh
+  uint64_t max_gap_ms = 0;            // Longest time seen between refreshes
+  uint32_t resets = 0;                // Number of watchdog resets reported
+  uint64_t reset_gap_ms = 0;          // Gap that caused the latest reset
+}
+
 void MarlinHAL::watchdog_refresh() {
+  if (SimWatchdog::enabled) {
+    const uint64_t now = Kernel::TimeControl::millis();
+    // Marlin's clock can read a few ms behind a timer ISR's, so compare signed
+    const int64_t gap = int64_t(now - SimWatchdog::last_refresh_ms);
+    if (gap > 0) NOLESS(SimWatchdog::max_gap_ms, uint64_t(gap));
+    SimWatchdog::last_refresh_ms = now;
+  }
   Kernel::yield();
 }
 
-void MarlinHAL::watchdog_init() {}
+void MarlinHAL::watchdog_init() {
+  const char *env = getenv("MARLIN_SIM_WATCHDOG");
+  SimWatchdog::enabled = !(env && env[0] == '0');
+  SimWatchdog::last_refresh_ms = Kernel::TimeControl::millis();
+}
+
+// Called every millisecond (independent of what Marlin is doing)
+static void watchdog_check() {
+  if (!SimWatchdog::enabled) return;
+  const uint64_t now = Kernel::TimeControl::millis();
+  const int64_t sgap = int64_t(now - SimWatchdog::last_refresh_ms);   // Signed: see watchdog_refresh()
+  if (sgap <= int64_t(SimWatchdog::timeout_ms)) return;
+  const uint64_t gap = uint64_t(sgap);
+  SimWatchdog::enabled = false;
+  SimWatchdog::resets++;
+  SimWatchdog::reset_gap_ms = gap;
+  NOLESS(SimWatchdog::max_gap_ms, gap);
+  printf("WATCHDOG RESET: no watchdog_refresh() for %llu ms (limit %llu ms) at %llu ms\n",
+         (unsigned long long)gap, (unsigned long long)SimWatchdog::timeout_ms, (unsigned long long)now);
+  fflush(stdout);
+  Kernel::quit_requested = true;
+}
 
 // Maple Compatibility
 volatile uint32_t systick_uptime_millis = 0;
@@ -89,5 +135,6 @@ systickCallback_t systick_user_callback;
 void systick_attach_callback(systickCallback_t cb) { systick_user_callback = cb; }
 void SYSTICK_IRQHandler() {
   systick_uptime_millis++;
+  watchdog_check();
   if (systick_user_callback) systick_user_callback();
 }

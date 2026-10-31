@@ -44,6 +44,15 @@ The simulator does not exit on its own. Stop it with `POST /kernel/control
 `eeprom.dat` and `imgui.ini`, so launch from a directory whose state you intend
 to use.
 
+### Watchdog
+
+When Marlin enables its watchdog (`USE_WATCHDOG`) the simulator watches Marlin's clock like a board would:
+if `hal.watchdog_refresh()` is not called for 4 s (8 s with `WATCHDOG_DURATION_8S`) it prints
+`WATCHDOG RESET: no watchdog_refresh() for N ms` and stops Marlin the way a reboot does. The agent may
+not answer after that, so read the process output. `GET /kernel` reports the longest gap so far in
+`watchdog.max_gap_ms`, which shows how close a code path comes to the limit. Set
+`MARLIN_SIM_WATCHDOG=0` to turn the emulation off.
+
 ### Configuration
 
 - `POST /gcode` writes into serial stream 3, which Marlin only reads if a serial
@@ -65,7 +74,7 @@ Simulation-thread requests time out with 503 after 5 s of wall-clock time.
 | Route | Thread | Purpose |
 | --- | --- | --- |
 | `GET /ping` | sim | Liveness. Proves the simulation thread is servicing requests. |
-| `GET /kernel` | sim | Ticks, sim time, realtime scale, ISR timing error, timers. |
+| `GET /kernel` | sim | Ticks, sim time, realtime scale, ISR timing error, timers, and `watchdog` (`enabled`, `resets`, `max_gap_ms`, `reset_gap_ms`). |
 | `POST /kernel/control` | direct | `{"realtime_scale":N}` (0 freezes, 1 = wall clock, max 1000), `{"break":true}`, `{"quit":true}`. |
 | `GET /components` | sim | Registry names usable with `/state/<name>`. |
 | `GET /state` | sim | Kernel plus every component, one snapshot. |
