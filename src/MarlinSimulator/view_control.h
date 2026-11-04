@@ -35,6 +35,8 @@ struct State {
   bool volume = false;
   std::string machine;
   int tool_held = -2;  // Toolchanger: tool on the carriage, -1 if none; -2 when the model is not a toolchanger
+  int tool_collisions = 0; bool tool_colliding = false;  // Toolchanger: tool bodies overlapping (held vs parked)
+  std::string docks, bed_mount;  // Toolchanger layout (see CubeLayout): "rear"|"front", "pillar"|"rods"; empty otherwise
 };
 
 inline std::mutex mutex;

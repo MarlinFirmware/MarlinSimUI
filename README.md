@@ -99,8 +99,11 @@ your configuration (bed size, Z height, delta geometry).
   **Belt Printer** (`BELTPRINTER`: a cube frame without bottom or back, tilted over two rollers and a belt)
   and **Toolchanger** (`SWITCHING_TOOLHEAD`, `MAGNETIC_SWITCHING_TOOLHEAD` or `ELECTROMAGNETIC_SWITCHING_TOOLHEAD`: a shallow Cube whose bed rides a single central pillar and threaded rod, with tools parked in rear docks).
   DELTA builds show the Delta, SCARA builds the SCARA, BELTPRINTER builds the Belt Printer, switching-toolhead builds the Toolchanger; other builds offer the Bedslinger and the Cube.
-- **Toolchanger:** the docks sit at `SWITCHING_TOOLHEAD_X_POS[]` and `SWITCHING_TOOLHEAD_Y_POS`. Each tool is a tinted heater block and nozzle with a
-  coupling block. It rides the carriage while it is the tool grabbed, and sits in its dock otherwise. The model follows the carriage position,
+- **Toolchanger:** the docks sit at `SWITCHING_TOOLHEAD_X_POS[]` and `SWITCHING_TOOLHEAD_Y_POS`. Docks in the front half of the bed
+  (`Y_POS` below the bed's Y center) are at the front, otherwise at the rear. Rear docks hold hotend-only tools and carry the bed on a
+  central pillar (E3D Toolchanger style); front docks hold whole toolheads with motor and fan (Prusa XL style) and carry the bed on Z
+  rods. `--bed-mount rods|pillar` overrides the bed support. Marlin infers the dock side the same way (`SWITCHING_TOOLHEAD_DOCK_DIR`), and all three variants work with either side.
+  Each tool is a tinted heater block and nozzle with a coupling block (or, at the front, a whole toolhead). It rides the carriage while it is the tool grabbed, and sits in its dock otherwise. The model follows the carriage position,
   so it shows whatever the firmware's tool change actually does.
 - **Belt printer:** Marlin Y moves the nozzle up the tilted gantry (Y=0 is the tip on the belt) and Z feeds the belt
   toward the open front. The simulator draws the physical result of the G-code it receives, so G-code sliced for

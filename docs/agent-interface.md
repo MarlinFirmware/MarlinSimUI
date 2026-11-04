@@ -36,6 +36,7 @@ Command-line options:
 | `--serial-port <n>` | TCP port for the raw G-code socket (default 8099, or `MARLIN_SIM_SERIAL_PORT`). |
 | `--no-audio` | Disable buzzer/audio emulation (useful for unattended runs). |
 | `--machine <type>` | Viewport printer model: `bedslinger`, `cube`, `delta`, `scara`, `belt` or `toolchanger`. Default follows the build's kinematics. DELTA builds accept only `delta`, SCARA builds only `scara`, BELTPRINTER builds only `belt`, MAGNETIC_SWITCHING_TOOLHEAD builds only `toolchanger`; other builds accept `bedslinger` and `cube`. |
+| `--bed-mount <rods\|pillar>` | Toolchanger bed support: Z rods, or one central pillar and threaded rod. Default: pillar for rear docks, rods for front docks. Ignored by other models. |
 | `--belt-angle <deg>` | Belt printer gantry tilt from the belt, 1 to 89 degrees (default 45). Ignored by other models. |
 | `--help` | Usage. |
 
@@ -182,7 +183,8 @@ belief — the difference between the two is usually the bug.
 "pitch", "distance", "x", "y", "z", "follow", "markings", "volume"}`. `x`,`y`,`z` is the camera
 target.
 
-On the Toolchanger model it also returns `"tool_held"`: the tool on the carriage, or -1 while the carriage is empty
+On the Toolchanger model it also returns `"colliding"` and `"collisions"` (a held tool overlapping a parked one now, and how many times it began to), `"docks"` (`"rear"` or `"front"`, from `SWITCHING_TOOLHEAD_Y_POS`), `"bed_mount"`
+(`"pillar"` or `"rods"`) and `"tool_held"`: the tool on the carriage, or -1 while the carriage is empty
 between dropping one tool and grabbing the next. It is decided from the carriage position on the simulation thread
 (grab on mating with a dock at `SWITCHING_TOOLHEAD_X_POS[t]` / `SWITCHING_TOOLHEAD_Y_POS`, left behind on backing off by
 `SWITCHING_TOOLHEAD_Y_RELEASE`), so a script can assert the order of a tool change: `T1` from T0 reads 0, -1, 1.

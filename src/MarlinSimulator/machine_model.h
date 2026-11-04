@@ -52,7 +52,31 @@ struct ScaraGeometry {
 extern MachineType machine_type_option;
 // Set by --belt-angle: belt printer gantry tilt in degrees; 0 = the default (MachineModel::belt_default_tilt)
 extern float belt_angle_option;
+// Set by --bed-mount: how a toolchanger's bed is carried. 0 = by the layout's default, 1 = Z rods, 2 = central pillar
+extern int bed_mount_option;
 MachineType machine_type_from_name(const char* name); // MACHINE_TYPE_COUNT if unknown
+
+// How the Cube-frame machines (Cube, Toolchanger) are put together. build_cube() reads only this, so each way of
+// placing parts is one named field, set in one place (for_type). New variants add a field and a for_type rule.
+struct CubeLayout {
+  enum class Docks : uint8_t { None, Rear, Front };   // Where tools park: none (a plain Cube), or a side of the frame
+  enum class BedMount : uint8_t { Rods, Pillar };     // Z rods and screws at the corners/sides, or one central pillar with a threaded rod
+
+  Docks docks = Docks::None;
+  BedMount bed_mount = BedMount::Rods;
+  bool core = false;               // CoreXY/CoreYX: both XY motors in the back corners (else Cartesian: X motor at the back, Y motor on the gantry)
+  bool whole_toolheads = false;    // Parked tools are whole toolheads (hotend, extruder motor, fan) rather than a hotend and its coupling block
+
+  bool has_docks() const { return docks != Docks::None; }
+  bool pillar() const { return bed_mount == BedMount::Pillar; }
+  bool docks_front() const { return docks == Docks::Front; }
+
+  // From the Marlin config. The dock side follows SWITCHING_TOOLHEAD_Y_POS: in the front half of the bed is the front.
+  // Rear docks are hotend-only tools on a central pillar (E3D Toolchanger style) and front docks are whole toolheads
+  // (Prusa XL style) on Z rods, unless --bed-mount says otherwise.
+  static CubeLayout for_type(const MachineType type);
+  static bool docks_at_front();   // The config's dock side (false without switching-toolhead options)
+};
 
 class MachineModel {
 public:
@@ -72,18 +96,22 @@ public:
   static glm::vec3 belt_contact();                     // World position of the tip at X = 0, Y = 0
   static glm::vec3 belt_nozzle_world(const glm::vec3 marlin); // Tip in world GL, belt feed (Z) not applied
 
-  // Toolchanger (SWITCHING_TOOLHEAD, MAGNETIC_ and ELECTROMAGNETIC_): a Cube whose tools park in rear docks at the firmware's
+  // Toolchanger (SWITCHING_TOOLHEAD, MAGNETIC_ and ELECTROMAGNETIC_): a Cube whose tools park in docks at one end of Y, at the firmware's
   // SWITCHING_TOOLHEAD_X_POS[] and SWITCHING_TOOLHEAD_Y_POS. Its Z axis is one threaded rod beside a central pillar that
   // carries the bed (no smooth rods), so it is shallow, and the docks flank the middle. Each tool is a hotend (the usual
   // tinted heater block and nozzle) with a block for its coupling; it rides the carriage while it is the one grabbed, and
-  // sits in its dock otherwise. The pickup and drop-off motion is followed for the magnetic variant; the others show the
-  // active tool when the change ends.
+  // sits in its dock otherwise. The pickup and drop-off motion is followed for all three variants.
   static bool is_toolchanger();
   static glm::vec2 dock_xy(const int tool);          // Dock of a tool in bed-relative Marlin XY, in the carriage's frame
   // Tool on the carriage, or -1 while it is empty between a drop and a grab. Written on the simulation thread by
   // update_tool_holder() at every carriage position update (so a fast tool change is not missed between frames);
   // read on the UI thread.
   std::atomic<int> tool_held { 0 };
+  // Tool bodies overlapping: a held tool against a parked one (footprints in Marlin XY, from the tools as built).
+  // 'tool_collisions' counts each time a held tool starts overlapping a parked one; 'tool_colliding' is the current state.
+  std::atomic<int> tool_collisions { 0 };
+  std::atomic<bool> tool_colliding { false };
+  std::atomic<float> tool_half_x { 13 }, tool_half_y { 13 };   // Half the width / depth of a tool's body
   void update_tool_holder(const glm::vec2 carriage);  // Carriage (T0 nozzle) position, bed-relative Marlin XY
 
   void build(const MachineType type, std::shared_ptr<renderer::ShaderProgram> program);
@@ -157,7 +185,7 @@ private:
   // World X of the carriages' outermost sides at the ends of X travel, to size the X axis around them
   void carriage_reach(const float margin, float& left, float& right) const;
   void build_bedslinger();
-  void build_cube(const bool toolchanger = false);
+  void build_cube(const CubeLayout& layout);
   void build_delta();
   void build_scara();
   void build_belt();
@@ -174,5 +202,6 @@ private:
   float hotend_dim[max_hotends] { 1, 1, 1, 1, 1, 1, 1, 1 };
   glm::vec3 hotend_layout[max_hotends] {};  // hotend_offset(h) when the parts were built
   glm::vec3 probe_layout {};                // live_probe_offset() when the parts were built
+  int tool_pending = -1;                    // Toolchanger (magnetic): the tool whose pickup slide is under way: not yet on the carriage
   bool tool_seated = false;                 // Toolchanger: the carriage is mated with the dock of the tool it holds
 };

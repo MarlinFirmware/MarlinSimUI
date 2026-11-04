@@ -84,6 +84,8 @@ static void print_usage(const char* argv0) {
   printf("  --machine <type>    Printer model in the Viewport: bedslinger, cube, delta, scara, belt, toolchanger\n");
   printf("                      (default: from the Marlin configuration; DELTA, SCARA and BELTPRINTER builds allow only their own)\n");
   printf("  --belt-angle <deg>  Belt printer gantry tilt from the belt, 1-89 (default %g)\n", MachineModel::belt_default_tilt);
+  printf("  --bed-mount <type>  Toolchanger bed support: rods (Z rods and screws) or pillar (one central pillar and threaded rod)\n");
+  printf("                      (default: pillar for rear docks, rods for front docks; docks follow SWITCHING_TOOLHEAD_Y_POS)\n");
   printf("  --help              Show this message\n");
 }
 
@@ -139,6 +141,12 @@ static bool parse_command_line(int argc, char** argv, CommandLineOptions& option
         fprintf(stderr, "--machine %s: not available for this build's kinematics (DELTA builds show only 'delta', SCARA builds only 'scara', BELTPRINTER builds only 'belt', switching-toolhead builds only 'toolchanger')\n", argv[i]);
         return false;
       }
+    }
+    else if (strcmp(arg, "--bed-mount") == 0) {
+      if (i + 1 < argc && strcmp(argv[i + 1], "rods") == 0) bed_mount_option = 1;
+      else if (i + 1 < argc && strcmp(argv[i + 1], "pillar") == 0) bed_mount_option = 2;
+      else { fprintf(stderr, "--bed-mount requires one of: rods, pillar\n"); return false; }
+      ++i;
     }
     else if (strcmp(arg, "--belt-angle") == 0) {
       char* end = nullptr;

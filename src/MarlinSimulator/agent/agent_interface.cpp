@@ -309,7 +309,13 @@ void handle_get_view(const Request&, Response& response) {
   writer.member("ok", true);
   writer.member("mode", v.turntable ? "turntable" : "fly");
   writer.member("machine", v.machine);
-  if (v.tool_held != -2) writer.member("tool_held", double(v.tool_held));
+  if (v.tool_held != -2) {
+    writer.member("tool_held", double(v.tool_held));
+    writer.member("colliding", v.tool_colliding);
+    writer.member("collisions", double(v.tool_collisions));
+    writer.member("docks", v.docks);
+    writer.member("bed_mount", v.bed_mount);
+  }
   writer.member("yaw", double(v.yaw));
   writer.member("pitch", double(v.pitch));
   writer.member("distance", double(v.distance));

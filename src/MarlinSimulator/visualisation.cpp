@@ -830,6 +830,13 @@ void Visualisation::apply_view_request() {
   s.follow = follow_nozzle;
   s.machine = MachineModel::type_name(machine.type);
   s.tool_held = machine.type == MACHINE_TOOLCHANGER ? machine.tool_held.load() : -2;
+  s.tool_collisions = machine.tool_collisions.load(); s.tool_colliding = machine.tool_colliding.load();
+  s.docks = s.bed_mount = "";
+  if (machine.type == MACHINE_TOOLCHANGER) {
+    const CubeLayout l = CubeLayout::for_type(MACHINE_TOOLCHANGER);
+    s.docks = l.docks_front() ? "front" : "rear";
+    s.bed_mount = l.pillar() ? "pillar" : "rods";
+  }
   s.markings = bed_markings.visible;
   s.volume = reach_volume.visible;
 }
