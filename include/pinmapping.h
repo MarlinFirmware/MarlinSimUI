@@ -32,8 +32,6 @@ typedef pin_type pin_t;
 #define NUM_DIGITAL_PINS 250
 #define NUM_ANALOG_INPUTS 16
 
-#define HAL_SENSITIVE_PINS
-
 // Get the digital pin for an analog index
 constexpr uint8_t analog_offset = NUM_DIGITAL_PINS - NUM_ANALOG_INPUTS;
 
