@@ -9,9 +9,9 @@
 #include "Gpio.h"
 #include "../virtual_printer.h"
 
-class Buzzer : public VirtualPrinter::Component {
+class BuzzerDevice : public VirtualPrinter::Component {
 public:
-  Buzzer(pin_type pin, bool invert_logic) : VirtualPrinter::Component("Buzzer"), pin(pin), invert_logic(invert_logic) {
+  BuzzerDevice(pin_type pin, bool invert_logic) : VirtualPrinter::Component("Buzzer"), pin(pin), invert_logic(invert_logic) {
     Gpio::attach(pin, [this](GpioEvent& ev){ this->interrupt(ev); });
 
     audio_set_sample_cb([this](void* userdata, Uint8* sample_buffer, int samples_buffer_size){
@@ -48,7 +48,7 @@ public:
 
     audio_start();
   }
-  ~Buzzer() {}
+  ~BuzzerDevice() {}
 
   void ui_widget() {
     int freq = m_frequency;

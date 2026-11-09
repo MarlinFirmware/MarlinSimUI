@@ -21,7 +21,7 @@ namespace imgui_custom {
     }
   };
 
-  ImVec2 scale_proportionally(ImVec2 size, double width, double height, bool integer_scaling) {
+  inline ImVec2 scale_proportionally(ImVec2 size, double width, double height, bool integer_scaling) {
     double scalex = size.x / width, scaley = size.y / height;
     if (scalex < scaley) {
       if (integer_scaling) {
