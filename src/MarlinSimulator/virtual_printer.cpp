@@ -374,7 +374,11 @@ void VirtualPrinter::build() {
     root->add_component<FilamentChanger>("Filament Changer", "Prusa MMU2", size_t(EXTRUDERS))->attach_mmu2(MMU_SERIAL_PORT);
   #else
     // No changer: every extruder (or mixing stepper) has a color of its own to pick
-    root->add_component<ExtruderColors>("Extruder Colors", size_t(ENABLED(MIXING_EXTRUDER) ? MIXING_STEPPERS : EXTRUDERS), bool(ENABLED(MIXING_EXTRUDER)));
+    #if ENABLED(MIXING_EXTRUDER)
+      root->add_component<ExtruderColors>("Extruder Colors", size_t(MIXING_STEPPERS), true);
+    #else
+      root->add_component<ExtruderColors>("Extruder Colors", size_t(EXTRUDERS), false);
+    #endif
   #endif
 
   #if ENABLED(FILAMENT_RUNOUT_SENSOR)
