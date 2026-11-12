@@ -123,6 +123,8 @@ bool ExtruderColors::apply(const agent::JsonValue& body, std::string& error) {
   }
   std::scoped_lock lock(mutex);
   color[size_t(slot)] = rgb;
-  mixed_color = blend();
+  double total = 0;
+  for (size_t i = 0; i < count; ++i) total += mix[i];
+  if (total > 0) mixed_color = blend();   // Until something is extruded there is no mix to show
   return true;
 }
