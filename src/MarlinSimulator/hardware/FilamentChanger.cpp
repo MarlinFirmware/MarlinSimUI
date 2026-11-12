@@ -6,6 +6,7 @@
 
 #include "FilamentChanger.h"
 #include "../agent/json.h"
+#include "color_picker.h"
 #include "FilamentRunoutSensor.h"
 #include "../execution_control.h"
 
@@ -300,11 +301,7 @@ static const glm::vec3 no_filament_color { 0.3f, 0.3f, 0.3f };
 
 FilamentChanger::FilamentChanger(const char* model, size_t slot_count)
   : VirtualPrinter::Component("FilamentChanger"), model(model), slot_count(std::min(slot_count, max_slots)) {
-  static const glm::vec3 defaults[max_slots] = {
-    {1.0f, 0.0f, 0.0f}, {0.0f, 0.6f, 0.0f}, {0.0f, 0.2f, 1.0f}, {1.0f, 0.9f, 0.0f},
-    {1.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 1.0f}, {1.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}
-  };
-  for (size_t i = 0; i < max_slots; ++i) slot_color[i] = defaults[i];
+  for (size_t i = 0; i < max_slots; ++i) slot_color[i] = color_picker::default_color(i);
   instance = this;
 }
 
@@ -418,24 +415,10 @@ void FilamentChanger::ui_widget() {
   const ImVec2 swatch(40, 40);
   for (size_t i = 0; i < slot_count; ++i) {
     ImGui::PushID(int(i));
-    ImGui::BeginGroup();
-    const ImVec4 col(slot_color[i].r, slot_color[i].g, slot_color[i].b, 1.0f);
-    if (ImGui::ColorButton("##swatch", col, ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoBorder, swatch))
-      ImGui::OpenPopup("##picker");
     // Mark the active color with a border (and the one chosen to load next with a thin one)
     const bool is_loaded = int(i) == loaded, is_selected = int(i) == selected && !is_loaded && phase == Phase::AwaitLoad;
-    if (is_loaded || is_selected) {
-      const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
-      ImGui::GetWindowDrawList()->AddRect(ImVec2(lo.x - 3, lo.y - 3), ImVec2(hi.x + 3, hi.y + 3),
-        is_loaded ? IM_COL32(255, 255, 255, 255) : IM_COL32(255, 220, 0, 255), 2.0f, 0, is_loaded ? 3.0f : 1.5f);
-    }
-    ImGui::Text(" T%d", int(i));
-    ImGui::EndGroup();
-    if (ImGui::BeginPopup("##picker")) {
-      ImGui::Text("T%d color", int(i));
-      ImGui::ColorPicker3("##color", &slot_color[i].x, ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_NoSidePreview);
-      ImGui::EndPopup();
-    }
+    color_picker::swatch(("T" + std::to_string(i)).c_str(), slot_color[i],
+      is_loaded ? color_picker::Mark::Active : is_selected ? color_picker::Mark::Selected : color_picker::Mark::None);
     ImGui::PopID();
     if (i + 1 < slot_count) ImGui::SameLine(0, 12);
   }
@@ -454,11 +437,7 @@ void FilamentChanger::ui_widget() {
   if (ImGui::Button("Reset")) { loaded = -1; selected = -1; phase = Phase::Ready; status = "Reset."; }
 }
 
-static std::string to_hex(const glm::vec3& c) {
-  char buf[8];
-  snprintf(buf, sizeof(buf), "#%02x%02x%02x", int(c.r * 255 + 0.5f), int(c.g * 255 + 0.5f), int(c.b * 255 + 0.5f));
-  return buf;
-}
+using color_picker::to_hex;
 
 void FilamentChanger::serialize(agent::JsonWriter& writer) const {
   std::scoped_lock lock(mutex);
