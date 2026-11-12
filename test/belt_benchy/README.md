@@ -44,7 +44,7 @@ Ground truth is the simulated steppers (`GET /state/CoreXY Kinematic System`), n
 - Every line is accepted: no `Unknown command`, `Error:` or halt.
 - At each checkpoint (every 30 layers, and the end of the print) the nozzle is where the G-code last sent it: X and Y within 0.05 mm, and the
   belt feed (Z, measured from where `G92 Z0` ran) within 0.05 mm. The E steppers have delivered the filament the G-code asked for, after `M221`
-  flow, within 3% (per-move step rounding with `M221 S94` is worth about 2.6% on this file; a planner that truncates the scaled E steps delivers 13% too little and fails). A move that Marlin clamped, dropped or mis-stepped shows up here.
+  flow, within 1%. A planner that truncates the flow-scaled E steps (`M221 S94` on this file) delivers 13% too little and fails. A move that Marlin clamped, dropped or mis-stepped shows up here.
 - The end G-code runs: it cools down, homes, and parks at Y50.
 - The simulated time is printed next to the slicer's estimate (not judged: it includes heating and cooling).
 

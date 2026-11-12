@@ -26,8 +26,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GCODE_GZ = os.path.join(HERE, "3DBenchy.gcode.gz")
 CHECK_LAYERS = 30      # compare with the G-code every this many layers
 POS_TOL = 0.05         # mm, X and Y and belt (Z)
-E_TOL = 0.03           # fraction of the filament delivered so far (plus a small absolute allowance). Per-move rounding of flow-scaled
-                       # E steps costs about +2.6% on this file; a planner that truncates instead loses about 13% and fails.
+E_TOL = 0.01           # fraction of the filament delivered so far (plus a small absolute allowance). A planner that truncates the
+                       # flow-scaled E steps (Marlin before the remainder fix) delivers about 13% too little on this file and fails.
 
 
 class Agent:
