@@ -112,6 +112,12 @@ your configuration (bed size, Z height, delta geometry).
   Choose one in the **Printer** menu, with `--machine`, or with `POST /view`.
 - **Multiple hotends:** one hotend per `HOTENDS`, placed at its tool offset. The
   model follows `M218`, `M501` and anything else that changes the offsets.
+- **Extruder colors:** every extruder has a color you pick in its **Extruder Colors**
+  panel (or set with the agent interface), and the extrusion is drawn in it. A
+  `MIXING_EXTRUDER` is simulated as one nozzle fed by `MIXING_STEPPERS` steppers,
+  and its extrusion takes the blend of the filament each stepper actually
+  delivered, so a wrong mix (including one made by Fixed-Time Motion) shows in the
+  viewport and in the delivered proportions.
 - **Temperature colors:** hotends go from light blue (cold) to pink (at target),
   and the bed from dark blue to dark red. The active hotend glows.
 - **Bed markings:** the 0,0 origin (white circle with a cross), the

@@ -15,6 +15,7 @@
 #include "hardware/W25QxxDevice.h"
 #include "hardware/FilamentRunoutSensor.h"
 #include "hardware/FilamentChanger.h"
+#include "hardware/ExtruderColors.h"
 #include "hardware/NeoPixelDevice.h"
 #include "hardware/KinematicSystem.h"
 #include "hardware/pwm_reader.h"
@@ -371,6 +372,9 @@ void VirtualPrinter::build() {
     root->add_component<FilamentChanger>("Filament Changer", "Prusa MMU3", size_t(EXTRUDERS))->attach_mmu3(MMU_SERIAL_PORT);
   #elif HAS_PRUSA_MMU2 && defined(MMU_SERIAL_PORT)
     root->add_component<FilamentChanger>("Filament Changer", "Prusa MMU2", size_t(EXTRUDERS))->attach_mmu2(MMU_SERIAL_PORT);
+  #else
+    // No changer: every extruder (or mixing stepper) has a color of its own to pick
+    root->add_component<ExtruderColors>("Extruder Colors", size_t(ENABLED(MIXING_EXTRUDER) ? MIXING_STEPPERS : EXTRUDERS), bool(ENABLED(MIXING_EXTRUDER)));
   #endif
 
   #if ENABLED(FILAMENT_RUNOUT_SENSOR)

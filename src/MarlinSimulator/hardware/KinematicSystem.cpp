@@ -8,6 +8,7 @@
 #include <src/inc/MarlinConfig.h>
 #include "../scara_frame.h"
 #include "FilamentChanger.h"
+#include "ExtruderColors.h"
 #include <src/module/motion.h> // motion.hotend_offset
 #if HAS_BED_PROBE
   #include <src/module/probe.h> // probe.offset (M851)
@@ -23,7 +24,17 @@
 #endif
 
 constexpr float steps_per_unit[] = DEFAULT_AXIS_STEPS_PER_UNIT;
-constexpr bool extruder_invert_dir[EXTRUDERS] = {
+
+static glm::vec3 extruder_color(const size_t i) { return ExtruderColors::color_of(i); }
+
+// One simulated E stepper per EXTRUDER, except a MIXING_EXTRUDER, which is one extruder driving MIXING_STEPPERS steppers
+#if ENABLED(MIXING_EXTRUDER)
+  constexpr size_t e_stepper_count = MIXING_STEPPERS;
+#else
+  constexpr size_t e_stepper_count = EXTRUDERS;
+#endif
+
+constexpr bool extruder_invert_dir[e_stepper_count] = {
 #ifdef INVERT_E0_DIR
   INVERT_E0_DIR,
 #endif
@@ -57,6 +68,12 @@ true;
 false;
 #endif
 
+#if ENABLED(MIXING_EXTRUDER)
+  #define SIM_E_STEPPERS MIXING_STEPPERS
+#else
+  #define SIM_E_STEPPERS EXTRUDERS
+#endif
+
 enum AxisIndex {
   X,
   #if HAS_X2_STEPPER
@@ -78,28 +95,28 @@ enum AxisIndex {
   #if NUM_Z_STEPPERS > 3
     Z4,
   #endif
-  #if EXTRUDERS > 0
+  #if SIM_E_STEPPERS > 0
     E0,
   #endif
-  #if EXTRUDERS > 1
+  #if SIM_E_STEPPERS > 1
     E1,
   #endif
-  #if EXTRUDERS > 2
+  #if SIM_E_STEPPERS > 2
     E2,
   #endif
-  #if EXTRUDERS > 3
+  #if SIM_E_STEPPERS > 3
     E3,
   #endif
-  #if EXTRUDERS > 4
+  #if SIM_E_STEPPERS > 4
     E4,
   #endif
-  #if EXTRUDERS > 5
+  #if SIM_E_STEPPERS > 5
     E5,
   #endif
-  #if EXTRUDERS > 6
+  #if SIM_E_STEPPERS > 6
     E6,
   #endif
-  #if EXTRUDERS > 7
+  #if SIM_E_STEPPERS > 7
     E7,
   #endif
   COUNT
@@ -108,6 +125,7 @@ enum AxisIndex {
 // Let the filament changer see the button axis and color the extrusion, then tell the visualisation
 void KinematicSystem::notify_update() {
   FilamentChanger::observe(state.position - world_from_native);
+  ExtruderColors::observe(e_stepper_mm);
   FilamentChanger::apply_colors(state);
   on_kinematic_update(state);
 }
@@ -195,37 +213,47 @@ void KinematicSystem::collect_steppers() {
   #if NUM_Z_STEPPERS > 3
     steppers.push_back(add_component<StepperDriver>("StepperZ4", Z4_ENABLE_PIN, Z4_DIR_PIN, Z4_STEP_PIN, [this](){ this->kinematic_update(); }));
   #endif
-  #if EXTRUDERS > 0
+  #if SIM_E_STEPPERS > 0
     steppers.push_back(add_component<StepperDriver>("StepperE0", E0_ENABLE_PIN, E0_DIR_PIN, E0_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 1
+  #if SIM_E_STEPPERS > 1
     steppers.push_back(add_component<StepperDriver>("StepperE1", E1_ENABLE_PIN, E1_DIR_PIN, E1_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 2
+  #if SIM_E_STEPPERS > 2
     steppers.push_back(add_component<StepperDriver>("StepperE2", E2_ENABLE_PIN, E2_DIR_PIN, E2_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 3
+  #if SIM_E_STEPPERS > 3
     steppers.push_back(add_component<StepperDriver>("StepperE3", E3_ENABLE_PIN, E3_DIR_PIN, E3_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 4
+  #if SIM_E_STEPPERS > 4
     steppers.push_back(add_component<StepperDriver>("StepperE4", E4_ENABLE_PIN, E4_DIR_PIN, E4_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 5
+  #if SIM_E_STEPPERS > 5
     steppers.push_back(add_component<StepperDriver>("StepperE5", E5_ENABLE_PIN, E5_DIR_PIN, E5_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 6
+  #if SIM_E_STEPPERS > 6
     steppers.push_back(add_component<StepperDriver>("StepperE6", E6_ENABLE_PIN, E6_DIR_PIN, E6_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
   #endif
-  #if EXTRUDERS > 7
+  #if SIM_E_STEPPERS > 7
     steppers.push_back(add_component<StepperDriver>("StepperE7", E7_ENABLE_PIN, E7_DIR_PIN, E7_STEP_PIN, [this](){ this->kinematic_update(); }));
-    state.effector_position.push_back({});
+  #endif
+  // One effector (nozzle) per extruder. A mixing extruder has many steppers but one nozzle.
+  for (size_t i = 0; i < EXTRUDERS; ++i) state.effector_position.push_back({});
+}
+
+// Filament pushed by each E stepper (mm), and from that the travel of each extruder (a mixing extruder's travel
+// is the sum of its steppers, since the mix proportions add up to the whole move).
+void KinematicSystem::collect_extruders() {
+  e_stepper_mm.clear();
+  for (size_t i = 0; i < e_stepper_count; ++i)
+    e_stepper_mm.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
+  extruder.clear();
+  #if ENABLED(MIXING_EXTRUDER)
+    double total = 0;
+    for (const double mm : e_stepper_mm) total += mm;
+    extruder.push_back(total);
+  #else
+    extruder = e_stepper_mm;
   #endif
 }
 
@@ -261,17 +289,6 @@ glm::vec3 hotend_offset_mm(const size_t h) {
   return {};
 }
 
-std::array<glm::vec3, 8> filament_color {
-  glm::vec3 {1.0, 0.0, 0.0},
-            {0.0, 1.0, 0.0},
-            {0.0, 0.0, 1.0},
-            {1.0, 1.0, 0.0},
-            {1.0, 0.0, 1.0},
-            {0.0, 1.0, 1.0},
-            {1.0, 1.0, 1.0},
-            {0.0, 0.0, 0.0}
-};
-
 void CartesianKinematicSystem::kinematic_update() {
   auto carriage = glm::vec3{
     std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::X])->steps() / steps_per_unit[0] * (((INVERT_X_DIR * 2) - 1) * -1.0),
@@ -279,14 +296,11 @@ void CartesianKinematicSystem::kinematic_update() {
     std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::Z])->steps() / steps_per_unit[2] * (((INVERT_Z_DIR * 2) - 1) * -1.0)
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
 #ifdef SINGLENOZZLE
   for (size_t i = 0; i < EXTRUDERS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0] + hotend_offset_mm(0), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0] + hotend_offset_mm(0), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 #elif ENABLED(DUAL_X_CARRIAGE)
   // IDEX: T0 rides the X carriage, and every other tool rides the X2 carriage, as in Marlin
@@ -298,14 +312,14 @@ void CartesianKinematicSystem::kinematic_update() {
     carriage.z
   };
   const glm::vec3 base2 { hardware_offset[1].x, hardware_offset[0].y, hardware_offset[0].z };
-  state.effector_position[0] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(carriage, extruder[0]), filament_color[0]};
+  state.effector_position[0] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(carriage, extruder[0]), extruder_color(0)};
   for (size_t i = 1; i < EXTRUDERS; ++i) {
     const glm::vec3 yz { 0, i < HOTENDS ? hotend_offset_mm(i).y : 0.0f, i < HOTENDS ? hotend_offset_mm(i).z : 0.0f };
-    state.effector_position[i] = {carriage2, glm::vec4(base2 + yz, 0.0f) + glm::vec4(carriage2, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage2, glm::vec4(base2 + yz, 0.0f) + glm::vec4(carriage2, extruder[i]), extruder_color(i)};
   }
 #else
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 #endif
 
@@ -368,13 +382,10 @@ void CoreXYKinematicSystem::kinematic_update() {
     std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::Z])->steps() / steps_per_unit[2] * (((INVERT_Z_DIR * 2) - 1) * -1.0)
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 
   state.position = state.effector_position[0].position;
@@ -427,13 +438,10 @@ void CoreXZKinematicSystem::kinematic_update() {
     (stepperA - stepperC) / 2.0   // Z position
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 
   state.position = state.effector_position[0].position;
@@ -485,13 +493,10 @@ void CoreYZKinematicSystem::kinematic_update() {
     (stepperB - stepperC) / 2.0   // Z position
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 
   state.position = state.effector_position[0].position;
@@ -543,13 +548,10 @@ void CoreYXKinematicSystem::kinematic_update() {
     std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::Z])->steps() / steps_per_unit[2] * (((INVERT_Z_DIR * 2) - 1) * -1.0)
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 
   state.position = state.effector_position[0].position;
@@ -601,13 +603,10 @@ void CoreZXKinematicSystem::kinematic_update() {
     (stepperC + stepperA) / 2.0   // Z position
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 
   state.position = state.effector_position[0].position;
@@ -659,13 +658,10 @@ void CoreZYKinematicSystem::kinematic_update() {
     (stepperC + stepperB) / 2.0   // Z position
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hardware_offset[0], 0.0f) + glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(carriage, extruder[i]), extruder_color(i)};
   }
 
   state.position = state.effector_position[0].position;
@@ -806,19 +802,17 @@ void DeltaKinematicSystem::kinematic_update() {
   };
 
   std::vector<double> extruder {};
-  for (size_t i = 0; i < EXTRUDERS; ++i) {
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
-  }
+  collect_extruders();
 
   auto cartesian_pos = forward_kinematics(hardware_offset[0].x + carriage.x, hardware_offset[0].y + carriage.y, hardware_offset[0].z + carriage.z) + glm::vec3{X_BED_SIZE / 2, Y_BED_SIZE / 2, 0.0};
 
 #ifdef SINGLENOZZLE
   for (size_t i = 0; i < EXTRUDERS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(cartesian_pos, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(cartesian_pos, extruder[i]), extruder_color(i)};
   }
 #else
   for (size_t i = 0; i < HOTENDS; ++i) {
-    state.effector_position[i] = {carriage, glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(cartesian_pos, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {carriage, glm::vec4(hotend_offset_mm(i), 0.0f) + glm::vec4(cartesian_pos, extruder[i]), extruder_color(i)};
   }
 #endif
 
@@ -888,9 +882,7 @@ void ScaraKinematicSystem::kinematic_update() {
     std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::Z])->steps() / steps_per_unit[2] * (((INVERT_Z_DIR * 2) - 1) * -1.0)
   };
 
-  extruder.clear();
-  for (size_t i = 0; i < EXTRUDERS; ++i)
-    extruder.push_back(std::static_pointer_cast<StepperDriver>(steppers[AxisIndex::E0 + i])->steps() / steps_per_unit[3 + (i * distinct_e_factors)] * (((extruder_invert_dir[i] * 2) - 1) * -1.0));
+  collect_extruders();
 
   const float a = hardware_offset[0].x + joint.x,
               psi = hardware_offset[0].y + joint.y - a * float(SCARA_CROSSTALK_FACTOR),
@@ -910,7 +902,7 @@ void ScaraKinematicSystem::kinematic_update() {
   for (size_t i = 0; i < HOTENDS; ++i) {
     const glm::vec3 o = hotend_offset_mm(i) - hotend_offset_mm(0);
     const glm::vec3 tip { nozzle.x + o.x * c - o.y * s, nozzle.y + o.x * s + o.y * c, nozzle.z };
-    state.effector_position[i] = {joint, glm::vec4(tip, extruder[i]), filament_color[i]};
+    state.effector_position[i] = {joint, glm::vec4(tip, extruder[i]), extruder_color(i)};
   }
 
   // The probe is bolted to the forearm too, at the M851 offset from T0 in the forearm's frame

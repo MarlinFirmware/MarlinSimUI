@@ -36,6 +36,7 @@ public:
 
   virtual void kinematic_update() = 0;
   void collect_steppers();
+  void collect_extruders();   // Fill e_stepper_mm and extruder from the E stepper counts
   void notify_update();
   virtual void serialize(agent::JsonWriter& writer) const override;
 
@@ -51,6 +52,10 @@ public:
   bool has_probe_tip = false;
   glm::vec3 probe_tip {};
 
+  // Signed filament moved so far by each E stepper (mm). A mixing extruder has several steppers for its one extruder.
+  std::vector<double> e_stepper_mm {};
+  std::vector<double> extruder {};   // Travel of each extruder (mm)
+
   std::vector<glm::vec3> hardware_offset {};
   std::vector<std::shared_ptr<VirtualPrinter::Component>> steppers;
   kinematic_state state{};
@@ -62,7 +67,6 @@ public:
   CartesianKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class CoreXYKinematicSystem : public KinematicSystem {
@@ -70,7 +74,6 @@ public:
   CoreXYKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class CoreXZKinematicSystem : public KinematicSystem {
@@ -78,7 +81,6 @@ public:
   CoreXZKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class CoreYZKinematicSystem : public KinematicSystem {
@@ -86,7 +88,6 @@ public:
   CoreYZKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class CoreYXKinematicSystem : public KinematicSystem {
@@ -94,7 +95,6 @@ public:
   CoreYXKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class CoreZXKinematicSystem : public KinematicSystem {
@@ -102,7 +102,6 @@ public:
   CoreZXKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class CoreZYKinematicSystem : public KinematicSystem {
@@ -110,7 +109,6 @@ public:
   CoreZYKinematicSystem(std::function<void(kinematic_state&)> on_kinematic_update);
   virtual void ui_widget() override;
   virtual void kinematic_update() override;
-  std::vector<double> extruder {};
 };
 
 class DeltaKinematicSystem : public KinematicSystem {
@@ -142,5 +140,4 @@ public:
 
   // Joint angles in degrees from the stepper positions: shoulder (theta) and elbow (psi, relative to the proximal arm)
   glm::vec2 joint_angles() const;
-  std::vector<double> extruder {};
 };
