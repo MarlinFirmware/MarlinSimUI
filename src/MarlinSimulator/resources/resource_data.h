@@ -16,6 +16,7 @@ static const char * data_shader_extrusion_gs = R"SHADERSTR(
   uniform mat4 u_mvp;
   uniform float u_layer_thickness;// = 0.3;
   uniform float u_layer_width;// = 0.4;
+  uniform vec3 u_layer_normal;    // Which way the layers stack. Flat printers: (0,1,0). A belt printer's layers lie in the tilted gantry plane.
 
   vec4 mvp_vertices[9];
   vec4 vertices[9];
@@ -40,11 +41,14 @@ static const char * data_shader_extrusion_gs = R"SHADERSTR(
     vec4 next_color = g_color[3];
 
     vec3 forward = normalize(end - start);
-    vec3 left = normalize(cross(forward, g_normal[2])); // what if formward is world_up? zero vector
+    bool flat_layers = u_layer_normal == vec3(0.0, 1.0, 0.0);
+    vec3 layer_n = flat_layers ? g_normal[2] : u_layer_normal;
+    vec3 left = normalize(cross(forward, layer_n)); // what if formward is world_up? zero vector
     if (left == vec3(0.0)) return; //panic
 
     vec3 up = normalize(cross(forward, left));
     up *= sign(up); // make sure up is positive
+    if (!flat_layers) up = layer_n; // tilted layers: the thickness goes along the layer normal, the width stays in the layer plane
 
     bool first_segment = length(start - prev) < epsilon;
     bool last_segment = length(end - next) < epsilon;
@@ -57,17 +61,22 @@ static const char * data_shader_extrusion_gs = R"SHADERSTR(
     c = (a + b) * 0.5;
     vec3 end_lhs = normalize(c) * sign(dot(c, left));
 
-    vec2 xz_dir_a = normalize(start.xz - prev.xz);
-    vec2 xz_dir_b = normalize(end.xz - start.xz);
-    vec2 xz_dir_c = normalize(next.xz - end.xz);
 
+
+    // Directions within the layer plane (flat layers: the XZ directions, as before)
+    vec3 plane_a = normalize(start - prev - layer_n * dot(start - prev, layer_n));
+    vec3 plane_b = normalize(end - start - layer_n * dot(end - start, layer_n));
+    vec3 plane_c = normalize(next - end - layer_n * dot(next - end, layer_n));
+    // A path leaves the layer plane when it moves along the layer normal (flat: any Y change; tilted: a small tolerance for float noise)
+    float out_of_plane = abs(dot(normalize(next - prev), layer_n));
+    bool leaves_plane = flat_layers ? out_of_plane != 0.0 : out_of_plane > 0.01;
 
     // remove edge cases that will break teh following algorithm, angle more than 90 degrees or 0 (points collinear), also break on extrude state change (color)
-    if(first_segment || active_color.a != prev_color.a || normalize(next - prev).y != 0.0 ||  dot(normalize(start.xz - prev.xz), normalize(end.xz - start.xz)) < epsilon || dot(normalize(start.xz - prev.xz), normalize(end.xz - start.xz)) > 1.0 - epsilon) {
+    if(first_segment || active_color.a != prev_color.a || leaves_plane || dot(plane_a, plane_b) < epsilon || dot(plane_a, plane_b) > 1.0 - epsilon) {
       start_lhs = left;
       first_segment = true;
     }
-    if(last_segment || active_color.a != next_color.a || normalize(next - prev).y != 0.0 || dot(normalize(end.xz - start.xz), normalize(next.xz - end.xz)) < epsilon || dot(normalize(end.xz - start.xz), normalize(next.xz - end.xz)) > 1.0 - epsilon) {
+    if(last_segment || active_color.a != next_color.a || leaves_plane || dot(plane_b, plane_c) < epsilon || dot(plane_b, plane_c) > 1.0 - epsilon) {
       end_lhs = left;
       last_segment = true;
     }

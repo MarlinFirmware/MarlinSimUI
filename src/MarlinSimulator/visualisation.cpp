@@ -324,6 +324,8 @@ void Visualisation::on_position_update() { }
 
 using millisec = std::chrono::duration<float, std::milli>;
 void Visualisation::update() {
+  // Layers stack along the normal of the plane the nozzle moves in: up on flat printers, the tilted gantry plane's normal on a belt printer
+  extrude_layer_normal = machine.type == MACHINE_BELT ? glm::normalize(MachineModel::belt_frame_rotation() * glm::vec3(0.0f, 1.0f, 0.0f)) : glm::vec3(0.0f, 1.0f, 0.0f);
   std::scoped_lock extrusion_lock(extrusion_mutex);
   // auto now = clock.now();
   // float delta = std::chrono::duration_cast<std::chrono::duration<float>>(now - last_update).count();
@@ -481,6 +483,7 @@ void Visualisation::update() {
         new_mesh_object->set_shader_program(extrusion_program);
         new_mesh_object->m_shader_instance->set_uniform("u_layer_thickness", &extrude_thickness);
         new_mesh_object->m_shader_instance->set_uniform("u_layer_width", &extrude_width);
+        new_mesh_object->m_shader_instance->set_uniform("u_layer_normal", &extrude_layer_normal);
         new_mesh_object->m_shader_instance->set_uniform("u_view_position", &camera.position);
       }
 
@@ -598,7 +601,10 @@ void Visualisation::set_head_position(size_t hotend_index, extruder_state& state
 
     // smooths out extrusion over a minimum length to fill in gaps todo: implement an simulation to do this better
     // also use Z (Y in opengl) change to reduce minimum extrude length
-    if (glm::length(glm::vec3(position) - glm::vec3(extruder.last_extrusion_check)) > m_config.extrusion_check_min_line_length || glm::abs(position.y - extruder.last_extrusion_check.y) > m_config.extrusion_check_max_vertical_deviation) {
+    // "Vertical" is along the layer normal: on a belt printer the nozzle's world Y changes whenever the gantry moves, which is
+    // not a layer change and made the check run (and see no E step yet) every few hundredths of a millimeter
+    const float layer_deviation = glm::abs(glm::dot(glm::vec3(position) - glm::vec3(extruder.last_extrusion_check), extrude_layer_normal));
+    if (glm::length(glm::vec3(position) - glm::vec3(extruder.last_extrusion_check)) > m_config.extrusion_check_min_line_length || layer_deviation > m_config.extrusion_check_max_vertical_deviation) {
       extruder.extruding = position.w - extruder.last_extrusion_check.w > 0.0f;
       extruder.last_extrusion_check = position;
     }

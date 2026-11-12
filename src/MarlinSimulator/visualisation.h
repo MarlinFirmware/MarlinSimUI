@@ -239,6 +239,7 @@ public:
 
   float extrude_width = 0.4;
   float extrude_thickness = 0.3;
+  glm::vec3 extrude_layer_normal { 0.0f, 1.0f, 0.0f };   // Which way layers stack (belt printer: the gantry plane's normal)
 
   bool m_initialised = false;
   visualisation_config m_config {};
