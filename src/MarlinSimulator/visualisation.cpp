@@ -606,7 +606,11 @@ void Visualisation::set_head_position(size_t hotend_index, extruder_state& state
     if (active_buffer != nullptr && active_buffer->size() > 1 && active_buffer->size() < renderer::MAX_BUFFER_SIZE) {
 
       if (glm::length(glm::vec3(position) - glm::vec3(extruder.last_position)) > m_config.extrusion_segment_minimum_length) { // smooth out the path so the model renders with less geometry, rendering each individual step hurts the fps
-        if ((points_are_collinear(position, active_buffer->cdata().end()[-3].position, active_buffer->cdata().end()[-2].position, m_config.extrusion_segment_collinearity_max_deviation) && extruder.extruding == extruder.last_extruding) || ( extruder.extruding == false && extruder.last_extruding == false)) {
+        // A color is stored per vertex and blends between vertices, so a straight run whose color keeps changing (a mixing
+        // extruder following a gradient) needs a new vertex each time the color has moved a visible amount
+        const glm::vec4& last_color = active_buffer->cdata().end()[-2].color;
+        const bool color_moved = extruder.extruding && glm::length(extrude_color - glm::vec3(last_color)) > 0.08f;
+        if ((points_are_collinear(position, active_buffer->cdata().end()[-3].position, active_buffer->cdata().end()[-2].position, m_config.extrusion_segment_collinearity_max_deviation) && extruder.extruding == extruder.last_extruding && !color_moved) || ( extruder.extruding == false && extruder.last_extruding == false)) {
           // collinear and extrusion state has not changed so we can just change the current point.
           active_buffer->data().end()[-2].position = position;
           active_buffer->data().end()[-1].position = position;
