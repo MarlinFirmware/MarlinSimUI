@@ -90,6 +90,9 @@ Simulation-thread requests time out with 503 after 5 s of wall-clock time.
 | `POST /screenshot` | sim | `{"path":"/abs/file.png"[, "display":"<name>"]}`. Writes a PNG. |
 | `POST /touch` | sim | `{"x":0..1, "y":0..1[, "hold_ms":N]}`. Taps or holds the touchscreen. |
 | `POST /touch/rects` | sim | `{"show":bool}` or `{}` to toggle. Overlays Marlin's touch control rects on the TFT. |
+| `POST /encoder` | sim | `{"steps":N[, "interval_ms":M]}`. Turns the LCD panel's encoder (see 2.9). |
+| `POST /button` | sim | `{"button":"enc"\|"back"\|"kill"[, "hold_ms":N]}`. Presses an LCD panel button (see 2.9). |
+| `GET /encoder` | sim | What the agent is doing to the panel's encoder and buttons (see 2.9). |
 | `POST /capture/<panel>` | varies | Capture a visual panel to PNG by short name, case-insensitive (see 2.7). |
 | `GET /view` | direct | Current Viewport camera and printer model (see 2.6). |
 | `POST /view` | direct | Set the Viewport camera and/or printer model. Applied on the next UI frame. |
@@ -257,6 +260,42 @@ sent over a serial stream can end it; host bytes are fed to the parser by
 Regression test: `scripts/m43_test.py <agent-port>` in the `marlin-simui-contributor`
 skill (needs `PINS_DEBUGGING`, `EMERGENCY_PARSER`, `SERIAL_PORT_2 3`).
 
+### 2.9 Encoder and buttons
+
+The LCD panels with an encoder (HD44780, ST7920, ST7565 and the ST7796 TFT)
+take input from the agent as well as from the keyboard and mouse:
+
+- `POST /encoder {"steps": N}` turns the knob N steps. Positive is clockwise:
+  with Marlin's default encoder direction, down a menu or up a value. A step is
+  `ENCODER_PULSES_PER_STEP` encoder states, and the panel moves one state every
+  `interval_ms` of simulated time (default 15). That is slow enough that
+  `ENCODER_RATE_MULTIPLIER` stays at 1x, so N steps change a value by N. A short
+  interval such as 2 turns fast enough to trigger the multiplier.
+- `POST /button {"button": "enc"}` presses the encoder button, and `"back"` or
+  `"kill"` the other buttons. The press lasts `hold_ms` of simulated time
+  (default 100) and until Marlin has read it. Marlin ignores the buttons for
+  500 ms after a click, so a press held longer than that clicks again. Kill
+  only acts once it has been held for Marlin's `KILL_DELAY` loops: 100 ms is
+  ignored, 2000 ms halts the printer.
+- `GET /encoder` reports the `device`, `pulses_per_step`, `rotating`,
+  `remaining_ms`, and whether `enc`, `back` or `kill` is still held. Poll it
+  until the last request has finished. A new rotation or press of the same
+  button while the last one is running gets 409.
+
+Marlin ignores input until its boot screen is gone, so wait for the status
+screen. It also remembers the highlighted row when you go back into a menu, so
+take a screenshot before counting steps.
+
+```sh
+curl -s -X POST http://127.0.0.1:8100/button  -d '{"button":"enc"}'   # open the menu
+curl -s -X POST http://127.0.0.1:8100/encoder -d '{"steps":2}'        # two rows down
+curl -s http://127.0.0.1:8100/encoder                                 # until "rotating": false
+curl -s -X POST http://127.0.0.1:8100/button  -d '{"button":"enc"}'   # select
+```
+
+The panels drive the kill pin themselves, so the separate "Kill Button"
+component is only added when there is no panel.
+
 ---
 
 ## 3. Using it for debugging
@@ -294,6 +333,8 @@ Guidelines:
   RGB888, row-major, top row first.
 - **New input device:** override `inject_touch()` (or add a sibling virtual for
   other input kinds) on the component, and route it in `agent_interface.cpp`.
+  A panel with an encoder returns its `AgentEncoderInput` from `agent_encoder()`
+  and combines it with its own state when Marlin reads a pin.
 - **New route:** `server.route("METHOD /path", handler[, Affinity, timeout_ms])`
   in `register_routes()`. Use `Affinity::Direct` only for handlers that touch
   nothing but atomics or their own lock.
@@ -330,19 +371,17 @@ from inside ISRs), which is another reason handlers must not block.
 3. `--headless`: run the simulation thread and agent server without a window or
    GL context, for CI. Serial capture is currently gated on the Serial Monitor UI
    elements existing and must be decoupled first.
-4. More input kinds: encoder rotation/click and hardware buttons for
-   character/graphic LCDs, alongside touch.
 
 Informed by prior art (Zephyr emul, MK404, Wokwi, QEMU qtest, Renode):
 
-5. Per-device transport vs backend split: each device implements its bus face
+4. Per-device transport vs backend split: each device implements its bus face
    (SPI/I2C/UART) plus a backend face exposed as `GET/POST /component/<name>/...`.
-6. Self-describing actions: `GET /actions` lists each component's named actions
+5. Self-describing actions: `GET /actions` lists each component's named actions
    and faults with typed arguments.
-7. Deterministic stepping: `POST /kernel/step {"ns":N}` or `{"until":"next_deadline"}`.
-8. Touch press/move/release, optionally in raw controller coordinates so
+6. Deterministic stepping: `POST /kernel/step {"ns":N}` or `{"until":"next_deadline"}`.
+7. Touch press/move/release, optionally in raw controller coordinates so
    Marlin's calibration and rotation paths are exercised.
-9. `POST /wait` on a serial line, component value threshold, or LCD text, with a
+8. `POST /wait` on a serial line, component value threshold, or LCD text, with a
    sim-time timeout.
-10. Named snapshots (EEPROM, SD, component state, sim time) and scenario files
+9. Named snapshots (EEPROM, SD, component state, sim time) and scenario files
     run by a CLI with CI exit codes.

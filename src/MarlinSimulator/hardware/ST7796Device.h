@@ -12,6 +12,7 @@
 
 #include "SPISlavePeripheral.h"
 #include "XPT2046Device.h"
+#include "AgentEncoderInput.h"
 
 #ifndef TFT_WIDTH
   #define TFT_WIDTH 480
@@ -37,6 +38,7 @@ public:
   void process_command(Command cmd);
   void update();
   void interrupt(GpioEvent& ev);
+  AgentEncoderInput* agent_encoder() override { return &agent_input; }
 
   void ui_init();
   void ui_widget();
@@ -106,7 +108,8 @@ public:
 
   bool key_pressed[KeyName::COUNT] = {};
   uint8_t encoder_position = 0.0f;
-  static constexpr int8_t encoder_table[4] = {1, 3, 2, 0};
+  static constexpr int8_t encoder_table[4] = {3, 2, 0, 1}; // Starts at a detent, with both lines high
+  AgentEncoderInput agent_input; // Driven by the agent interface
 
   bool dirty = true;
   std::chrono::steady_clock clock;

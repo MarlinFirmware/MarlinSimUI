@@ -148,6 +148,24 @@ bool VirtualPrinter::inject_touch(float rx, float ry, uint32_t hold_ms, std::str
   return false;
 }
 
+AgentEncoderInput* VirtualPrinter::agent_encoder(std::string& matched_name) {
+  for (auto const& component : components) {
+    AgentEncoderInput * const input = component->agent_encoder();
+    if (!input) continue;
+    matched_name = component->name;
+    return input;
+  }
+  return nullptr;
+}
+
+int VirtualPrinter::encoder_pulses_per_step() {
+  #ifdef ENCODER_PULSES_PER_STEP
+    return ENCODER_PULSES_PER_STEP;
+  #else
+    return 4;
+  #endif
+}
+
 std::map<uint64_t, uint64_t> servo_pin_lookup { {0, SERVO0_PIN}, {1, SERVO1_PIN}, {2, SERVO2_PIN}, {3, SERVO3_PIN}};
 
 
@@ -505,7 +523,10 @@ void VirtualPrinter::build() {
   #endif
 
   #if HAS_KILL
-    root->add_component<Button>("Kill Button", KILL_PIN, false);
+    // The LCD panels drive the kill pin themselves (K key, agent "kill").
+    // A second driver on the pin would overwrite their level on every read.
+    std::string panel;
+    if (!agent_encoder(panel)) root->add_component<Button>("Kill Button", KILL_PIN, false);
   #endif
 
   #ifdef NEOPIXEL_LED

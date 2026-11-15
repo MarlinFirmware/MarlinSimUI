@@ -12,6 +12,7 @@
 #include <vector>
 
 struct kinematic_state;
+class AgentEncoderInput;
 
 namespace agent { class JsonWriter; class JsonValue; }
 
@@ -70,6 +71,15 @@ public:
       (void)rx; (void)ry; (void)hold_ms;
       return false;
     }
+
+    /**
+     * The encoder and buttons the agent interface drives (POST /encoder,
+     * POST /button) on an LCD panel. The default returns nullptr, meaning
+     * "no encoder".
+     *
+     * Called on the simulation thread.
+     */
+    virtual AgentEncoderInput* agent_encoder() { return nullptr; }
 
     /**
      * Change this component's simulated state for the agent interface -- the
@@ -143,6 +153,12 @@ public:
 
   // Inject a touch into the first touch device. Returns false if there is none.
   static bool inject_touch(float rx, float ry, uint32_t hold_ms, std::string& matched_name);
+
+  // The first LCD panel's agent encoder, or nullptr if no panel has one
+  static AgentEncoderInput* agent_encoder(std::string& matched_name);
+
+  // Encoder pulses per menu step, from Marlin's ENCODER_PULSES_PER_STEP
+  static int encoder_pulses_per_step();
 
   static void build();
   static void update_kinematics();

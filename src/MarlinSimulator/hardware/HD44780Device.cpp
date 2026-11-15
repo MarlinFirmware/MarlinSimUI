@@ -179,13 +179,13 @@ void HD44780Device::interrupt(GpioEvent& ev) {
       // stop sound
     }
   } else if (ev.pin_id == kill_pin) {
-    Gpio::set_pin_value(kill_pin, !key_pressed[KeyName::KILL_BUTTON]);
+    Gpio::set_pin_value(kill_pin, !(key_pressed[KeyName::KILL_BUTTON] || agent_input.pressed(AgentEncoderInput::KILL)));
   } else if (ev.pin_id == enc_but_pin) {
-    Gpio::set_pin_value(enc_but_pin, !key_pressed[KeyName::ENCODER_BUTTON]);
+    Gpio::set_pin_value(enc_but_pin, !(key_pressed[KeyName::ENCODER_BUTTON] || agent_input.pressed(AgentEncoderInput::ENCODER)));
   } else if (ev.pin_id == back_pin) {
-    Gpio::set_pin_value(back_pin, !key_pressed[KeyName::BACK_BUTTON]);
+    Gpio::set_pin_value(back_pin, !(key_pressed[KeyName::BACK_BUTTON] || agent_input.pressed(AgentEncoderInput::BACK)));
   } else if (ev.pin_id == enc1_pin || ev.pin_id == enc2_pin) {
-    const uint8_t encoder_state = encoder_position % 4;
+    const uint8_t encoder_state = (encoder_position + agent_input.position()) & 3;
     Gpio::set_pin_value(enc1_pin, encoder_table[encoder_state] & 0x01);
     Gpio::set_pin_value(enc2_pin, encoder_table[encoder_state] & 0x02);
   }
