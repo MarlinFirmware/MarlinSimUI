@@ -7,6 +7,7 @@
 #include "../user_interface.h"
 #include "../agent/json.h"
 #include "SPISlavePeripheral.h"
+#include "AgentEncoderInput.h"
 
 /**
  * ST7565-family 128x64 graphic LCD controller (ST7565, ST7567, UC1701, LM6059).
@@ -33,6 +34,7 @@ public:
 
   void update() override;
   void interrupt(GpioEvent& ev);
+  AgentEncoderInput* agent_encoder() override { return &agent_input; }
   void onByteReceived(uint8_t _byte) override;
   void ui_init() override;
   void ui_widget() override;
@@ -75,7 +77,8 @@ private:
 
   bool key_pressed[KeyName::COUNT] = {};
   uint8_t encoder_position = 0;
-  static constexpr int8_t encoder_table[4] = {1, 3, 2, 0};
+  static constexpr int8_t encoder_table[4] = {3, 2, 0, 1}; // Starts at a detent, with both lines high
+  AgentEncoderInput agent_input; // Driven by the agent interface
 
   bool render_integer_scaling = false, render_popout = false;
   bool dirty = true;

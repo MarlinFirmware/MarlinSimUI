@@ -15,6 +15,7 @@
 #include "../hardware/fat_image.h"
 #include "../hardware/SDCard.h"
 #include "../hardware/ST7796Device.h"
+#include "../hardware/AgentEncoderInput.h"
 
 #include "serial.h"
 #include <src/gcode/queue.h>
@@ -591,6 +592,138 @@ void handle_get_idle(const Request&, Response& response) {
   response.json(writer.str());
 }
 
+// POST /encoder — turn the LCD panel's encoder, as a user would with the knob.
+//   {"steps": 3}                      three steps clockwise: down a menu, up a value
+//   {"steps": -1}                     one step anticlockwise
+//   {"steps": 5, "interval_ms": 2}    faster, to test ENCODER_RATE_MULTIPLIER
+//
+// A step is ENCODER_PULSES_PER_STEP quadrature states. The panel moves one
+// state every interval_ms of simulated time (default 15, slow enough not to
+// trigger encoder acceleration). Never blocks: poll GET /encoder until
+// "rotating" is false.
+void handle_post_encoder(const Request& request, Response& response) {
+  JsonValue body;
+  if (!body.parse(request.body)) {
+    response.error(400, "body is not valid JSON");
+    return;
+  }
+
+  double steps = 0.0, interval = 15.0;
+  if (!body.get_double("steps", steps) || steps != double(int32_t(steps)) || steps < -1000.0 || steps > 1000.0) {
+    response.error(400, "'steps' (a whole number, -1000 to 1000) is required");
+    return;
+  }
+  body.get_double("interval_ms", interval);
+  if (interval < 1.0 || interval > 1000.0) {
+    response.error(400, "'interval_ms' must be between 1 and 1000");
+    return;
+  }
+
+  std::string matched;
+  AgentEncoderInput * const input = VirtualPrinter::agent_encoder(matched);
+  if (!input) {
+    response.error(404, "no encoder found");
+    return;
+  }
+  // The panels' encoder states count down in Marlin, so clockwise is negative here
+  const int32_t pulses = -int32_t(steps) * VirtualPrinter::encoder_pulses_per_step();
+  if (!input->rotate(pulses, uint32_t(interval))) {
+    response.error(409, "the encoder is still turning");
+    return;
+  }
+
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("ok", true);
+  writer.member("device", matched);
+  writer.member("steps", int(steps));
+  writer.member("interval_ms", interval);
+  writer.member("duration_ms", double(pulses < 0 ? -pulses : pulses) * uint32_t(interval));
+  writer.end_object();
+  response.json(writer.str());
+}
+
+// POST /button — press an LCD panel button.
+//   {"button": "enc"}                   click the encoder
+//   {"button": "back", "hold_ms": 500}  "back" and "kill" are the other buttons
+//
+// Held for hold_ms of simulated time (default 100) and until Marlin has read it.
+// Marlin ignores the buttons for 500 ms after a click, so a press held longer
+// than that clicks again, as on a printer. Never blocks: poll GET /encoder until
+// the button is false.
+void handle_post_button(const Request& request, Response& response) {
+  JsonValue body;
+  if (!body.parse(request.body)) {
+    response.error(400, "body is not valid JSON");
+    return;
+  }
+
+  std::string name;
+  if (!body.get_string("button", name)) {
+    response.error(400, "'button' (enc, back or kill) is required");
+    return;
+  }
+  AgentEncoderInput::Button button;
+  if (name == "enc")        button = AgentEncoderInput::ENCODER;
+  else if (name == "back")  button = AgentEncoderInput::BACK;
+  else if (name == "kill")  button = AgentEncoderInput::KILL;
+  else {
+    response.error(400, "'button' must be enc, back or kill");
+    return;
+  }
+
+  double hold = 100.0;
+  body.get_double("hold_ms", hold);
+  if (hold < 0.0 || hold > 60000.0) {
+    response.error(400, "'hold_ms' must be between 0 and 60000");
+    return;
+  }
+
+  std::string matched;
+  AgentEncoderInput * const input = VirtualPrinter::agent_encoder(matched);
+  if (!input) {
+    response.error(404, "no encoder found");
+    return;
+  }
+  if (!input->press(button, uint32_t(hold))) {
+    response.error(409, "the button is still held");
+    return;
+  }
+
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("ok", true);
+  writer.member("device", matched);
+  writer.member("button", name);
+  writer.member("hold_ms", hold);
+  writer.end_object();
+  response.json(writer.str());
+}
+
+// GET /encoder — what the agent is doing to the panel's encoder and buttons
+void handle_get_encoder(const Request& request, Response& response) {
+  (void)request;
+  std::string matched;
+  AgentEncoderInput * const input = VirtualPrinter::agent_encoder(matched);
+  if (!input) {
+    response.error(404, "no encoder found");
+    return;
+  }
+
+  JsonWriter writer;
+  writer.begin_object();
+  writer.member("device", matched);
+  writer.member("pulses_per_step", VirtualPrinter::encoder_pulses_per_step());
+  writer.member("rotating", input->rotating());
+  writer.member("remaining_ms", input->remaining_ms());
+  writer.member("position", int(input->position()));
+  writer.member("enc", input->holding(AgentEncoderInput::ENCODER));
+  writer.member("back", input->holding(AgentEncoderInput::BACK));
+  writer.member("kill", input->holding(AgentEncoderInput::KILL));
+  writer.end_object();
+  response.json(writer.str());
+}
+
 #if ENABLED(TOUCH_SCREEN)
 
 // POST /touch — press the touchscreen, as a user would with the mouse.
@@ -1119,6 +1252,9 @@ void register_routes() {
     server.route("POST /screenshot", handle_post_screenshot);
     server.route("POST /capture/lcd", handle_post_screenshot);
     server.route("GET /displays", handle_get_displays);
+    server.route("POST /encoder", handle_post_encoder);
+    server.route("POST /button", handle_post_button);
+    server.route("GET /encoder", handle_get_encoder);
     #if ENABLED(TOUCH_SCREEN)
       server.route("POST /touch", handle_post_touch);
       #if ANY(TFT_INTERFACE_SPI, TFT_INTERFACE_FSMC)
