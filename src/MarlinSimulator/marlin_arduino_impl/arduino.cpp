@@ -23,6 +23,7 @@
 #include <iostream>
 #include <src/inc/MarlinConfig.h>
 #include <MarlinSimulator/execution_control.h>
+#include <MarlinSimulator/hardware/ExternalInterrupts.h>
 #include <src/HAL/shared/Delay.h>
 
 // Interrupts
@@ -31,6 +32,9 @@ void sei() { Kernel::enableInterrupts(); } // Enable
 
 void noInterrupts() {cli();}
 void interrupts() {sei();}
+
+void attachInterrupt(uint32_t pin, void (*callback)(), uint32_t mode) { ExternalInterrupts::attach(pin, callback, mode); }
+void detachInterrupt(uint32_t pin) { ExternalInterrupts::detach(pin); }
 
 // Time functions
 void _delay_ms(const int delay_ms) {

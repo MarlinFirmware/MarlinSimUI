@@ -28,7 +28,9 @@ extern void marlin_loop();
 extern "C" void TIMER0_IRQHandler();
 extern "C" void TIMER1_IRQHandler();
 extern void SYSTICK_IRQHandler();
-std::array<KernelTimer, 4> Kernel::Timers::timers({KernelTimer{"Stepper ISR", TIMER0_IRQHandler, 1}, {"Temperature ISR", TIMER1_IRQHandler, 10}, {"SysTick", SYSTICK_IRQHandler, 5}, {"Marlin Loop", marlin_loop, 100}});
+extern void EXTI_IRQHandler();
+// External Interrupts (attachInterrupt) rank just below the stepper ISR, see hardware/ExternalInterrupts.h
+std::array<KernelTimer, 5> Kernel::Timers::timers({KernelTimer{"Stepper ISR", TIMER0_IRQHandler, 1}, {"Temperature ISR", TIMER1_IRQHandler, 10}, {"SysTick", SYSTICK_IRQHandler, 5}, {"Marlin Loop", marlin_loop, 100}, {"External Interrupts", EXTI_IRQHandler, 2}});
 
 bool Kernel::timers_active = true;
 std::deque<KernelTimer*> Kernel::isr_stack;

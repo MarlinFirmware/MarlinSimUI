@@ -9,6 +9,7 @@
 #include "../scara_frame.h"
 #include "FilamentChanger.h"
 #include "ExtruderColors.h"
+#include "ExternalInterrupts.h"
 #include <src/module/motion.h> // motion.hotend_offset
 #if HAS_BED_PROBE
   #include <src/module/probe.h> // probe.offset (M851)
@@ -128,6 +129,7 @@ void KinematicSystem::notify_update() {
   ExtruderColors::observe(e_stepper_mm);
   FilamentChanger::apply_colors(state);
   on_kinematic_update(state);
+  ExternalInterrupts::sample();   // The move may have tripped an endstop or probe
 }
 
 void KinematicSystem::serialize(agent::JsonWriter& writer) const {
