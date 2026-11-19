@@ -75,7 +75,7 @@ bool wait_readable(socket_t socket, uint32_t timeout_us) {
 
   timeval timeout {};
   timeout.tv_sec  = time_t(timeout_us / 1000000);
-  timeout.tv_usec = suseconds_t(timeout_us % 1000000);
+  timeout.tv_usec = decltype(timeout.tv_usec)(timeout_us % 1000000); // suseconds_t on POSIX, long in Winsock
 
   int ready = select(int(socket) + 1, &read_set, nullptr, nullptr, &timeout);
   return ready > 0 && FD_ISSET(socket, &read_set);
