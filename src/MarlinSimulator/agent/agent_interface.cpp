@@ -29,6 +29,8 @@ extern MSerialT serial_stream_0, serial_stream_1, serial_stream_2, serial_stream
 
 #include <cstring>
 #include <strings.h>
+#include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -51,6 +53,14 @@ namespace agent {
 AgentServer server;
 
 namespace {
+
+// Case-insensitive search for `needle` in `hay`. strcasestr() is a GNU extension MinGW doesn't have.
+bool contains_nocase(const char* hay, const std::string& needle) {
+  const char* const end = hay + strlen(hay);
+  return std::search(hay, end, needle.begin(), needle.end(), [](char a, char b) {
+    return std::tolower((unsigned char)a) == std::tolower((unsigned char)b);
+  }) != end;
+}
 
 const char* timer_state(const KernelTimer& timer) {
   if (timer.running) return "running";
@@ -1171,7 +1181,7 @@ void handle_get_pins(const Request& request, Response& response) {
     const PinEntry e = pin_table_at(i);
     const bool is_out = Gpio::getDir(pin_type(e.pin)) == OUTPUT;
     if (has_pin && e.pin != pin_wanted) continue;
-    if (!name_filter.empty() && !strcasestr(e.name, name_filter.c_str())) continue;
+    if (!name_filter.empty() && !contains_nocase(e.name, name_filter)) continue;
     if (dir_filter == "in" && is_out) continue;
     if (dir_filter == "out" && !is_out) continue;
     writer.begin_object();
